@@ -261,17 +261,19 @@ int main() {
     config.current = *ParseVersion("0.7.1-beta.2");
     config.include_betas = false;
     Publish(fixture.server, "v0.7.0", "0.7.0", "00.007.000");
+    // A beta install reads the release list even when Beta updates is off, so an older entry is not an update.
+    fixture.server.releases = "[" + fixture.server.latest + "]";
     UpdateService stable(config);
     stable.Check(true); Wait(stable);
     CHECK(stable.Snapshot().phase == UpdatePhase::kUpToDate);
-    fixture.server.latest = beta;
+    fixture.server.releases = "[" + beta + "]";
     stable.Check(true); Wait(stable);
     CHECK(stable.Snapshot().phase == UpdatePhase::kUpToDate);
     Publish(fixture.server, "v0.7.1-beta.3", "0.7.1-beta.2", "00.007.001");
     fixture.server.releases = "[" + fixture.server.latest + "]";
-    stable.SetIncludeBetas(true);
     stable.Check(true); Wait(stable);
     CHECK(stable.Snapshot().available.ToString() == "0.7.1-beta.3");
+    stable.SetIncludeBetas(true);
     stable.Install(); Wait(stable);
     CHECK(stable.Snapshot().phase == UpdatePhase::kStaged);
     // The local override uses the same opt-in rule and needs no GitHub request.

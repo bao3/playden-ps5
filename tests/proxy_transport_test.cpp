@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -80,7 +81,12 @@ int main(int argc, char** argv) {
 
   auto downloaded = Get(client, url, true);
   assert(downloaded.ok() && downloaded.status_code == 200);
-  assert(std::string(downloaded.body.begin(), downloaded.body.end()) == "fixture-ok");
+  if (std::string(downloaded.body.begin(), downloaded.body.end()) != "fixture-ok") {
+    std::fprintf(stderr, "proxy body %zu:", downloaded.body.size());
+    for (unsigned char byte : downloaded.body) std::fprintf(stderr, " %02x", byte);
+    std::fprintf(stderr, "\n%s\n", Events(log).c_str());
+    assert(false);
+  }
   assert(Events(log).find("http connect download.invalid:" + std::to_string(origin)) != std::string::npos);
   assert(downloaded.proxy_label.find("secret") == std::string::npos);
 
