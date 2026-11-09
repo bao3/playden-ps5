@@ -11,8 +11,11 @@ permissions:
 
 jobs:
   host-tests:
-    # macos-latest is arm64 and this repository could not acquire one. macos-13 is the Intel pool.
-    runs-on: macos-13
+    # macos-13 was removed on 2025-12-04 and macOS 14 on 2026-11-02
+    # (actions/runner-images README; github.blog/changelog/2025-09-19).
+    # macos-15-intel is a current standard GitHub-hosted Intel label, not a larger runner.
+    # The arm64 pool (macos-latest) did not acquire a runner for this repository.
+    runs-on: macos-15-intel
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
