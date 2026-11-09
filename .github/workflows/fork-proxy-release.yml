@@ -40,12 +40,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates clang-18 cmake curl git ninja-build \
+            build-essential ca-certificates clang-18 lld-18 cmake curl git ninja-build \
             python3 unzip zip llvm-18 libdigest-sha-perl
           bindir=$(llvm-config-18 --bindir)
           if [[ ! -e "$bindir/clang" ]]; then sudo ln -sfn "$(command -v clang-18)" "$bindir/clang"; fi
           if [[ ! -e "$bindir/clang++" ]]; then sudo ln -sfn "$(command -v clang++-18)" "$bindir/clang++"; fi
           "$bindir/clang" --version
+          test -x "$bindir/ld.lld"
       - name: Build the PS5 package
         env:
           PLAYDEN_PRERELEASE: beta.9001
