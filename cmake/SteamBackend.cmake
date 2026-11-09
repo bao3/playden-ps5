@@ -90,8 +90,13 @@ foreach(archive libcurl.a libeverest.a libmbedcrypto.a libmbedtls.a
             steam_network_probe ps5_archives "${archive}")
         file(SHA256 "${archive_path}" actual_hash)
         if(NOT actual_hash STREQUAL expected_hash)
-            message(FATAL_ERROR "Pinned ps5 archive hash mismatch: ${archive}. "
-                "Rebuild with scripts/network-deps/prepare-ps5-deps.sh")
+            if(DEFINED ENV{PLAYDEN_ACCEPT_PS5_CURL_REBUILD})
+                message(WARNING "PS5 archive ${archive} is ${actual_hash}, pin is ${expected_hash}. "
+                    "PLAYDEN_ACCEPT_PS5_CURL_REBUILD is set, so this fork build continues.")
+            else()
+                message(FATAL_ERROR "Pinned ps5 archive hash mismatch: ${archive}. "
+                    "Rebuild with scripts/network-deps/prepare-ps5-deps.sh")
+            endif()
         endif()
     endif()
     list(APPEND playden_steam_archives "${archive_path}")

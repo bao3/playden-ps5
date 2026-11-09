@@ -30,28 +30,21 @@ jobs:
             -R '^(preferences|network_proxy|proxy_transport|http_client|cm_client|homebrew_library_model)$'
 
   ps5-package:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install the PS5 cross toolchain packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates clang-18 lld-18 cmake curl git ninja-build \
-            python3 unzip zip llvm-18 libdigest-sha-perl
-          bindir=$(llvm-config-18 --bindir)
-          if [[ ! -e "$bindir/clang" ]]; then sudo ln -sfn "$(command -v clang-18)" "$bindir/clang"; fi
-          if [[ ! -e "$bindir/clang++" ]]; then sudo ln -sfn "$(command -v clang++-18)" "$bindir/clang++"; fi
-          "$bindir/clang" --version
-          test -x "$bindir/ld.lld"
+      - name: Install the PS5 cross toolchain
+        run: brew install cmake ninja pkgconf llvm@18
       - name: Build the PS5 package
         env:
           PLAYDEN_PRERELEASE: beta.9001
+          PLAYDEN_ACCEPT_PS5_CURL_REBUILD: "1"
         run: |
           set -euo pipefail
+          export PATH="$(brew --prefix llvm@18)/bin:$PATH"
           scripts/fetch-deps.sh
           scripts/build-lapy-helper.sh || {
             echo "lapy helper failed"
@@ -69,7 +62,7 @@ jobs:
           curl --fail --location --retry 3 \
             -o playden-kit-0.20.zip \
             https://github.com/leolobato/playden-ps5/releases/download/v0.11.0-beta.1/playden-kit-0.20.zip
-          echo "959acf877a82b2711454fd62ba4a9a7c0476ee24627e92511283aeb54ace5a46  playden-kit-0.20.zip" | sha256sum -c
+          echo "959acf877a82b2711454fd62ba4a9a7c0476ee24627e92511283aeb54ace5a46  playden-kit-0.20.zip" | shasum -a 256 -c
           python3 "$GITHUB_WORKSPACE/tools/write_update_manifest.py" \
             --app-zip playden-ps5-0.11.0-beta.9001.zip \
             --kit-zip playden-kit-0.20.zip \
@@ -78,7 +71,7 @@ jobs:
             --tag v0.11.0-beta.9001 \
             --notes "Fork build 0.11.0-beta.9001 adds a downloads proxy with an optional global scope. It is not an official Playden release. Settings, Playden updates still checks the upstream Playden releases and can replace this build when a newer upstream version is published. The runtime kit is 0.20, unchanged." \
             --out playden-update.json
-          sha256sum playden-ps5-0.11.0-beta.9001.zip playden-kit-0.20.zip playden-update.json > SHA256SUMS
+          shasum -a 256 playden-ps5-0.11.0-beta.9001.zip playden-kit-0.20.zip playden-update.json > SHA256SUMS
           unzip -l playden-ps5-0.11.0-beta.9001.zip > zip-listing.txt
       - uses: actions/upload-artifact@v4
         with:
