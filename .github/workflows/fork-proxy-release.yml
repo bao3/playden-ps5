@@ -23,6 +23,9 @@ jobs:
         run: |
           set -euo pipefail
           scripts/build-homebrew.sh
+          cmake --build --preset homebrew-host --target \
+            preferences_test network_proxy_test proxy_transport_test \
+            http_client_test cm_client_test homebrew_library_model_test
           ctest --preset homebrew-host --output-on-failure \
             -R '^(preferences|network_proxy|proxy_transport|http_client|cm_client|homebrew_library_model)$'
 
