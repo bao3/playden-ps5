@@ -43,8 +43,8 @@ jobs:
             build-essential ca-certificates clang-18 cmake curl git ninja-build \
             python3 unzip zip llvm-18 libdigest-sha-perl
           bindir=$(llvm-config-18 --bindir)
-          sudo ln -sfn "$(command -v clang-18)" "$bindir/clang"
-          sudo ln -sfn "$(command -v clang++-18)" "$bindir/clang++"
+          if [[ ! -e "$bindir/clang" ]]; then sudo ln -sfn "$(command -v clang-18)" "$bindir/clang"; fi
+          if [[ ! -e "$bindir/clang++" ]]; then sudo ln -sfn "$(command -v clang++-18)" "$bindir/clang++"; fi
           "$bindir/clang" --version
       - name: Build the PS5 package
         env:
