@@ -4,6 +4,7 @@
 
 #include "steam/backend/native_network.h"
 #include "steam/backend/native_resolution_cache.h"
+#include "steam/backend/network_proxy.h"
 
 #include <curl/curl.h>
 
@@ -163,8 +164,21 @@ bool ValidRequest(const HttpRequest& request) {
   return true;
 }
 
-HttpError MapError(CURLcode code, const TransferBuffer& transfer, bool canceled) {
+bool ProxyCurlFailure(CURLcode code) {
+  switch (code) {
+    case CURLE_COULDNT_RESOLVE_PROXY:
+    case CURLE_PROXY:
+    case CURLE_LOGIN_DENIED:
+    case CURLE_COULDNT_CONNECT:
+      return true;
+    default:
+      return false;
+  }
+}
+
+HttpError MapError(CURLcode code, const TransferBuffer& transfer, bool canceled, bool proxy_failed) {
   if (canceled) return HttpError::kCanceled;
+  if (proxy_failed) return HttpError::kProxyFailed;
   if (transfer.body_overflow) return HttpError::kResponseTooLarge;
   if (transfer.header_overflow) return HttpError::kResponseHeadersTooLarge;
   if (transfer.malformed_header) return HttpError::kProtocolError;
@@ -203,6 +217,7 @@ const char* HttpErrorName(HttpError error) {
     case HttpError::kResponseTooLarge: return "response_too_large";
     case HttpError::kResponseHeadersTooLarge: return "response_headers_too_large";
     case HttpError::kProtocolError: return "protocol_error";
+    case HttpError::kProxyFailed: return "proxy_failed";
   }
   return "protocol_error";
 }
@@ -211,6 +226,7 @@ std::string HttpFailureName(const HttpResponse& response) {
   std::string name = HttpErrorName(response.error);
   if (response.transport_code != 0) name += " curl=" + std::to_string(response.transport_code);
   if (!response.ok() && !response.address.empty()) name += " addr=" + response.address;
+  if (!response.ok() && !response.proxy_label.empty()) name += " proxy=" + response.proxy_label;
   return name;
 }
 
@@ -245,6 +261,9 @@ class HttpClient::Impl {
     internal::NativeResolveError resolve_error = internal::NativeResolveError::kFailed;
     bool added = false;
     bool canceled = false;
+    bool proxy_bound = false;
+    bool proxy_failed = false;
+    std::string proxy_label;
 
     if (!easy || !multi) goto cleanup;
     for (const auto& header : request.headers) {
@@ -274,7 +293,6 @@ class HttpClient::Impl {
     PLAYDEN_SETOPT(CURLOPT_SSL_VERIFYPEER, 1L);
     PLAYDEN_SETOPT(CURLOPT_SSL_VERIFYHOST, 2L);
     PLAYDEN_SETOPT(CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
-    PLAYDEN_SETOPT(CURLOPT_PROXY, "");
     PLAYDEN_SETOPT(CURLOPT_FOLLOWLOCATION, 0L);
     PLAYDEN_SETOPT(CURLOPT_MAXREDIRS, 0L);
     PLAYDEN_SETOPT(CURLOPT_PROTOCOLS_STR, request.allow_plain_http ? "http,https" : "https");
@@ -303,6 +321,27 @@ class HttpClient::Impl {
 #undef PLAYDEN_SETOPT
 
     {
+      const auto bound = BindProxy(easy, request.download_proxy ? ProxyScope::kDownload : ProxyScope::kExternal,
+                                   request.url, cancel);
+      if (bound == ProxyBindResult::kCanceled) {
+        canceled = true;
+        result = CURLE_ABORTED_BY_CALLBACK;
+        goto cleanup;
+      }
+      if (bound == ProxyBindResult::kRejected) {
+        proxy_failed = true;
+        proxy_label = ProxyLogLabel(CurrentNetworkProxy());
+        result = CURLE_COULDNT_RESOLVE_PROXY;
+        goto cleanup;
+      }
+      proxy_bound = bound == ProxyBindResult::kBound;
+      if (proxy_bound) {
+        proxy_label = ProxyLogLabel(CurrentNetworkProxy());
+        resolve_error = internal::NativeResolveError::kNone;
+      }
+    }
+
+    if (!proxy_bound) {
       const auto start = Clock::now();
       resolve_error = resolution_cache_.Attach(easy, request.url, request.timeout_ms, cancel,
                                                &resolve_entries_, Clock::now());
@@ -392,7 +431,9 @@ class HttpClient::Impl {
     if (added) curl_multi_remove_handle(multi, easy);
     if (easy) curl_easy_cleanup(easy);
     curl_slist_free_all(request_headers);
-    transfer.response.error = MapError(result, transfer, canceled);
+    if (proxy_bound && ProxyCurlFailure(result)) proxy_failed = true;
+    transfer.response.error = MapError(result, transfer, canceled, proxy_failed);
+    if (proxy_failed) transfer.response.proxy_label = proxy_label;
     if (!transfer.response.ok()) {
       transfer.response.transport_code = result == CURLE_OK ? 0 : static_cast<int>(result);
       // Clearing both caches covers transport failure and abandonment before curl consumes

@@ -16,7 +16,8 @@ enum class AuthError {
   kInvalidPassword,  // EResult 5: Steam does not say whether the name or the password was wrong
   kRateLimited,      // EResult 84: too many attempts
   kSignInRefused,    // any other refusal; the QR code may still work
-  kSignInTimedOut
+  kSignInTimedOut,
+  kProxy  // the configured proxy failed; sign-in was not attempted directly
 };
 
 struct AuthResult {

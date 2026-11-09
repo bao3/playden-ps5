@@ -16,6 +16,7 @@
 #include "stores/local/scanner.h"
 #include "steam/backend/json.h"
 #include "steam/secret.h"
+#include "steam/backend/network_proxy.h"
 
 #include <cstring>
 #include <algorithm>
@@ -4219,7 +4220,8 @@ playden::Preferences Simulation::ExportPreferences() const {
     return {state_.reduced_motion, state_.title_store_suffix, state_.cloud_saves_auto, state_.sign_in_password,
             state_.downloads_slow_network, state_.stay_signed_in, state_.beta_updates, state_.download_server,
             state_.web_access, state_.content_language, state_.hide_run_once_help, state_.hide_launcher_help,
-            state_.runtime_prompt_kit};
+            state_.runtime_prompt_kit, state_.proxy_mode, state_.proxy_host, state_.proxy_port,
+            state_.proxy_username, state_.proxy_password, state_.proxy_global};
 }
 
 void Simulation::apply_organization_snapshot(const playden::OrganizationSnapshot& snapshot) {
@@ -4454,6 +4456,13 @@ bool Simulation::ApplyPreferences(PersistenceLoadToken token,
         state_.hide_run_once_help = loaded.preferences.hide_run_once_help;
         state_.hide_launcher_help = loaded.preferences.hide_launcher_help;
         state_.runtime_prompt_kit = loaded.preferences.runtime_prompt_kit;
+        state_.proxy_mode = loaded.preferences.download_proxy_mode;
+        state_.proxy_host = loaded.preferences.download_proxy_host;
+        state_.proxy_port = loaded.preferences.download_proxy_port;
+        state_.proxy_username = loaded.preferences.download_proxy_username;
+        steam::ZeroizeSecret(state_.proxy_password);
+        state_.proxy_password = loaded.preferences.download_proxy_password;
+        state_.proxy_global = loaded.preferences.download_proxy_global;
         captured_preferences_ = loaded.preferences;
         preferences_saved_revision_ = preferences_revision_;
     }
@@ -4721,7 +4730,13 @@ bool Simulation::record_live_persistence() {
                                       after_preferences.hide_run_once_help != captured_preferences_.hide_run_once_help ||
                                       after_preferences.hide_launcher_help != captured_preferences_.hide_launcher_help ||
                                       after_preferences.runtime_prompt_kit != captured_preferences_.runtime_prompt_kit ||
-                                      after_preferences.steam_stay_signed_in != captured_preferences_.steam_stay_signed_in);
+                                      after_preferences.steam_stay_signed_in != captured_preferences_.steam_stay_signed_in ||
+                                      after_preferences.download_proxy_mode != captured_preferences_.download_proxy_mode ||
+                                      after_preferences.download_proxy_host != captured_preferences_.download_proxy_host ||
+                                      after_preferences.download_proxy_port != captured_preferences_.download_proxy_port ||
+                                      after_preferences.download_proxy_username != captured_preferences_.download_proxy_username ||
+                                      after_preferences.download_proxy_password != captured_preferences_.download_proxy_password ||
+                                      after_preferences.download_proxy_global != captured_preferences_.download_proxy_global);
 
     if (organization_changed && !snapshot_within_model_bounds(after_organization)) {
         apply_organization_snapshot(captured_organization_);
@@ -4752,6 +4767,13 @@ bool Simulation::record_live_persistence() {
                 state_.hide_run_once_help = captured_preferences_.hide_run_once_help;
                 state_.hide_launcher_help = captured_preferences_.hide_launcher_help;
                 state_.runtime_prompt_kit = captured_preferences_.runtime_prompt_kit;
+                state_.proxy_mode = captured_preferences_.download_proxy_mode;
+                state_.proxy_host = captured_preferences_.download_proxy_host;
+                state_.proxy_port = captured_preferences_.download_proxy_port;
+                state_.proxy_username = captured_preferences_.download_proxy_username;
+                steam::ZeroizeSecret(state_.proxy_password);
+                state_.proxy_password = captured_preferences_.download_proxy_password;
+                state_.proxy_global = captured_preferences_.download_proxy_global;
                 organization_journal_full_ = true;
                 force_organization_reset_ = false;
                 force_organization_selection_ = false;
@@ -7710,6 +7732,28 @@ void Simulation::rebuild_view() {
                 : fastest ? "Tests the servers when a download starts and uses the fastest one."
                 : listed && !offered ? "Not offered on this network now. Steam default is used."
                 : "If it stops answering, Playden uses another one.";
+            auto& proxy = add("settings-proxy-mode", RowKind::Action, "Proxy", "proxy-mode");
+            proxy.value = state_.proxy_mode == "http" ? "HTTP" : state_.proxy_mode == "socks5" ? "SOCKS5" : "Off";
+            proxy.subtitle = state_.proxy_mode == "off"
+                ? "Off: downloads connect directly. HTTP and SOCKS5 use the host and port below."
+                : "On: a failure stays on the proxy. It does not connect directly instead.";
+            auto& proxy_host = add("settings-proxy-host", RowKind::Action, "Proxy host", "proxy-host");
+            proxy_host.value = state_.proxy_host.empty() ? "Not set" : state_.proxy_host;
+            proxy_host.subtitle = "IPv4 address or DNS name.";
+            auto& proxy_port = add("settings-proxy-port", RowKind::Action, "Port", "proxy-port");
+            proxy_port.value = state_.proxy_port.empty() ? "Not set" : state_.proxy_port;
+            proxy_port.subtitle = "From 1 to 65535.";
+            auto& proxy_user = add("settings-proxy-username", RowKind::Action, "Username", "proxy-username");
+            proxy_user.value = state_.proxy_username.empty() ? "Not set" : state_.proxy_username;
+            proxy_user.subtitle = "Optional. A password needs a username.";
+            auto& proxy_password = add("settings-proxy-password", RowKind::Action, "Password", "proxy-password");
+            proxy_password.value = state_.proxy_password.empty() ? "Not set" : "Saved";
+            proxy_password.subtitle = "Optional. Hidden while you type it.";
+            auto& proxy_global = add("settings-proxy-global", RowKind::Toggle, "Global proxy", "toggle-proxy-global");
+            proxy_global.selected = state_.proxy_global;
+            proxy_global.subtitle = state_.proxy_global
+                ? "Steam sign-in and other connections use the proxy too. The proxy sees server names."
+                : "Off: only downloads use the proxy. Sign-in stays direct.";
         }
         section = "Display";
         auto& motion = add("settings-motion", RowKind::Toggle, "Reduced motion", "toggle-motion");
@@ -8313,6 +8357,18 @@ void Simulation::submit_fixture_sign_in() {
     succeed();
 }
 
+namespace {
+bool ProxyEndpointOk(const std::string& host, const std::string& port) {
+    const auto proxy = steam::MakeNetworkProxy("http", host, port, "", "", false);
+    return !proxy.host.empty() && proxy.port >= 1 && proxy.port <= 65535;
+}
+
+void ProxyNotice(State& state, const std::string& message) {
+    std::erase_if(state.notices, [](const Notice& notice) { return notice.id == "proxy-validation"; });
+    state.notices.push_back({"proxy-validation", message, "", false, 8, true, {}, false});
+}
+}
+
 void Simulation::commit_editor() {
     if (state_.navigation.route == Route::SignIn &&
         (state_.editor.purpose == "Account name" || state_.editor.purpose == "Password" ||
@@ -8335,6 +8391,50 @@ void Simulation::commit_editor() {
         state_.editor.secret = false;
         state_.editor.revealed = false;
         state_.navigation.focus_key = next;
+        return;
+    }
+    if (state_.editor.purpose == "Proxy host" || state_.editor.purpose == "Proxy port" ||
+        state_.editor.purpose == "Proxy username" || state_.editor.purpose == "Proxy password") {
+        const std::string value = trimmed(state_.editor.value);
+        std::string message;
+        if (state_.editor.purpose == "Proxy host") {
+            const bool empty_while_on = value.empty() && state_.proxy_mode != "off";
+            if (empty_while_on || (!value.empty() && !ProxyEndpointOk(value, state_.proxy_port.empty() ? "1" : state_.proxy_port)))
+                message = value.empty() ? "Enter a proxy host." : "That proxy host isn't valid.";
+            else state_.proxy_host = value;
+        } else if (state_.editor.purpose == "Proxy port") {
+            const bool empty_while_on = value.empty() && state_.proxy_mode != "off";
+            if (empty_while_on || (!value.empty() && !ProxyEndpointOk(state_.proxy_host.empty() ? "proxy.invalid" : state_.proxy_host, value)))
+                message = "Enter a port from 1 to 65535.";
+            else state_.proxy_port = value;
+        } else if (state_.editor.purpose == "Proxy username") {
+            const auto checked = steam::MakeNetworkProxy("off", "proxy.invalid", "1", value, "", false);
+            if (checked.username != value) message = "That proxy username isn't valid.";
+            else {
+                state_.proxy_username = value;
+                if (value.empty()) steam::ZeroizeSecret(state_.proxy_password);
+            }
+        } else {
+            const auto checked = steam::MakeNetworkProxy("off", "proxy.invalid", "1", state_.proxy_username, value, false);
+            if (!value.empty() && state_.proxy_username.empty()) message = "Enter a proxy username before a password.";
+            else if (checked.password != value) message = "That proxy password isn't valid.";
+            else {
+                steam::ZeroizeSecret(state_.proxy_password);
+                state_.proxy_password = value;
+            }
+        }
+        if (state_.editor.secret) {
+            steam::ZeroizeSecret(state_.editor.value);
+            steam::ZeroizeSecret(state_.editor.original);
+        }
+        state_.editor.active = false;
+        state_.editor.secret = false;
+        state_.editor.revealed = false;
+        if (!message.empty()) ProxyNotice(state_, message);
+        else save_profile();
+        state_.navigation.focus_key = state_.editor.purpose == "Proxy host" ? "settings-proxy-host"
+            : state_.editor.purpose == "Proxy port" ? "settings-proxy-port"
+            : state_.editor.purpose == "Proxy username" ? "settings-proxy-username" : "settings-proxy-password";
         return;
     }
     if (state_.editor.purpose == "Search") { state_.library.query = state_.editor.value; reconcile_library_selection(state_); }
@@ -10475,6 +10575,23 @@ void Simulation::activate() {
     else if (action_name == "toggle-web-access") { state_.web_access = !state_.web_access; save_profile(); }
     else if (action_name == "toggle-downloads-slow") {
         state_.downloads_slow_network = !state_.downloads_slow_network;
+        save_profile();
+    }
+    else if (action_name == "proxy-mode") {
+        const std::string next = state_.proxy_mode == "off" ? "http" : state_.proxy_mode == "http" ? "socks5" : "off";
+        if (next != "off" && !ProxyEndpointOk(state_.proxy_host, state_.proxy_port))
+            ProxyNotice(state_, "Enter a proxy host and a port from 1 to 65535.");
+        else {
+            state_.proxy_mode = next;
+            save_profile();
+        }
+    }
+    else if (action_name == "proxy-host") start_editor("Proxy host", state_.proxy_host);
+    else if (action_name == "proxy-port") start_editor("Proxy port", state_.proxy_port);
+    else if (action_name == "proxy-username") start_editor("Proxy username", state_.proxy_username);
+    else if (action_name == "proxy-password") start_editor("Proxy password", state_.proxy_password, true);
+    else if (action_name == "toggle-proxy-global") {
+        state_.proxy_global = !state_.proxy_global;
         save_profile();
     }
     else if (action_name == "launch") { state_.session_game_id = state_.navigation.selected_game_id; state_.session = SessionState::Preparing; state_.navigation.route = Route::Session; state_.navigation.focus_key = "session-return"; }

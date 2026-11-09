@@ -135,7 +135,8 @@ endif()
 add_library(playden_steam_http STATIC
     "${CMAKE_SOURCE_DIR}/src/steam/backend/http_client.cpp"
     "${CMAKE_SOURCE_DIR}/src/steam/backend/ws_client.cpp"
-    "${CMAKE_SOURCE_DIR}/src/steam/backend/native_network.cpp")
+    "${CMAKE_SOURCE_DIR}/src/steam/backend/native_network.cpp"
+    "${CMAKE_SOURCE_DIR}/src/steam/backend/network_proxy.cpp")
 target_include_directories(playden_steam_http PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_compile_features(playden_steam_http PUBLIC cxx_std_17)
 target_link_libraries(playden_steam_http PUBLIC playden_curl_8_22 Threads::Threads)
@@ -252,6 +253,17 @@ function(playden_register_steam_backend_tests)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/http_fixture_server.py"
                 "$<TARGET_FILE:http_client_test>" "${CMAKE_SOURCE_DIR}/tests/fixtures/http")
         set_tests_properties(http_client PROPERTIES TIMEOUT 15)
+
+        add_executable(network_proxy_test "${CMAKE_SOURCE_DIR}/tests/network_proxy_test.cpp")
+        target_link_libraries(network_proxy_test PRIVATE playden_steam_http)
+        add_test(NAME network_proxy COMMAND network_proxy_test)
+
+        add_executable(proxy_transport_test "${CMAKE_SOURCE_DIR}/tests/proxy_transport_test.cpp")
+        target_link_libraries(proxy_transport_test PRIVATE playden_steam_http)
+        add_test(NAME proxy_transport
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proxy_fixture_server.py"
+                "$<TARGET_FILE:proxy_transport_test>")
+        set_tests_properties(proxy_transport PROPERTIES TIMEOUT 60)
 
         add_executable(auth_client_test "${CMAKE_SOURCE_DIR}/tests/auth_client_test.cpp")
         target_link_libraries(auth_client_test PRIVATE playden_steam_auth)

@@ -1,4 +1,5 @@
 #include "steam/backend/cm_client.h"
+#include "steam/backend/network_proxy.h"
 #include "steam/backend/proto_wire.h"
 
 #include <algorithm>
@@ -738,6 +739,32 @@ void SharedSessionServesEveryClientWithOneLogon() {
   assert(script->closed);
 }
 
+void SharedSessionReconnectsWhenTheProxyChanges() {
+  auto script = std::make_shared<Script>();
+  script->on_logon = {ServerFrame(cm::kEMsgClientLogOnResponse, LogonResponseBody(1, 9))};
+  script->on_service = {ServerFrame(cm::kEMsgServiceMethodResponse, {}, std::nullopt, 1)};
+  SetNetworkProxy(NetworkProxy{});
+  auto shared = MakeCmSharedSession();
+  auto client = MakeClient(script);
+  client.SetSharedSession(shared);
+  std::atomic<bool> cancel{false};
+  assert(Ping(client, cancel) == CmError::kNone);
+  assert(script->connects == 1);
+  NetworkProxy http;
+  http.mode = ProxyMode::kHttp;
+  http.host = "203.0.113.5";
+  http.port = 8080;
+  SetNetworkProxy(std::move(http));
+  {
+    std::lock_guard<std::mutex> lock(script->mutex);
+    script->closed = false;
+  }
+  assert(Ping(client, cancel) == CmError::kNone);
+  assert(script->connects == 2);
+  assert(CountSent(script, cm::kEMsgClientLogon) == 2);
+  SetNetworkProxy(NetworkProxy{});
+}
+
 void SharedSessionLogsOnAgainForNewCredentials() {
   auto script = std::make_shared<Script>();
   script->on_logon = {ServerFrame(cm::kEMsgClientLogOnResponse, LogonResponseBody(1, 9))};
@@ -1396,6 +1423,7 @@ int main(int argc, char** argv) {
   SharedSessionServesEveryClientWithOneLogon();
   ResetCmBackoff();
   SharedSessionLogsOnAgainForNewCredentials();
+  SharedSessionReconnectsWhenTheProxyChanges();
   SharedSessionCountsLicenseChanges();
   ResetCmBackoff();
   WaitingForTheSharedSessionIsCancelableAndUntimed();

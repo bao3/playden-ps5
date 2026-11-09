@@ -17,14 +17,23 @@ std::string ToString(const Bytes& bytes) {
   return std::string(bytes.begin(), bytes.end());
 }
 
-// Versions 8 to 11: one "key=value" line per field, in this order, each ending in a newline. Version 9 adds
+// Versions 8 to 12: one "key=value" line per field, in this order, each ending in a newline. Version 9 adds
 // web_access (on in older files), version 10 content_language (English in older files, which is what they
 // downloaded), version 11 the launcher dialogs' "Don't show this again" (shown in older files), version 12 the kit
-// whose "Update your games" prompt was shown (none in older files, so they are offered it).
+// whose "Update your games" prompt was shown (none in older files, so they are offered it). Version 13 adds the
+// downloads proxy (off, and not global, in older files).
 constexpr const char* kKeys[] = {"reduce_motion", "title_store_suffix", "cloud_saves_auto",
                                           "steam_sign_in_password", "downloads_slow_network", "steam_stay_signed_in",
                                           "beta_updates", "download_server", "web_access", "content_language",
-                                          "hide_run_once_help", "hide_launcher_help", "runtime_prompt_kit"};
+                                          "hide_run_once_help", "hide_launcher_help", "runtime_prompt_kit",
+                                          "download_proxy_mode", "download_proxy_host", "download_proxy_port",
+                                          "download_proxy_username", "download_proxy_password", "download_proxy_global"};
+
+std::size_t FieldCount(int version) {
+  if (version >= 13) return 19;
+  if (version >= 11) return static_cast<std::size_t>(version + 1);
+  return static_cast<std::size_t>(version);
+}
 
 bool ParseFlag(const std::string& value, bool* flag) {
   if (value != "0" && value != "1") return false;
@@ -45,7 +54,7 @@ bool ParseKeyed(const std::string& serialized, int version, Preferences* prefere
   std::vector<std::string> values;
   std::size_t start = header.size();
   // Version 11 added two fields; the others one each from version 8's eight.
-  const std::size_t count = static_cast<std::size_t>(version >= 11 ? version + 1 : version);
+  const std::size_t count = FieldCount(version);
   for (std::size_t field = 0; field < count; ++field) {
     const char* key = kKeys[field];
     const std::string prefix = std::string(key) + "=";
@@ -74,6 +83,16 @@ bool ParseKeyed(const std::string& serialized, int version, Preferences* prefere
     parsed.runtime_prompt_kit = values[12];
   // A host the current rule refuses is dropped without resetting unrelated preferences.
   if (ValidDownloadServer(values[7])) parsed.download_server = values[7];
+  if (version >= 13) {
+    const std::string& mode = values[13];
+    if (mode != "off" && mode != "http" && mode != "socks5") return false;
+    if (!ParseFlag(values[18], &parsed.download_proxy_global)) return false;
+    parsed.download_proxy_mode = mode;
+    parsed.download_proxy_host = values[14];
+    parsed.download_proxy_port = values[15];
+    parsed.download_proxy_username = values[16];
+    parsed.download_proxy_password = values[17];
+  }
   *preferences = std::move(parsed);
   return true;
 }
@@ -99,7 +118,7 @@ PreferencesLoadResult PreferencesStore::Load() const {
 
   std::string serialized = ToString(read.value());
   Preferences keyed;
-  if (ParseKeyed(serialized, 12, &keyed) || ParseKeyed(serialized, 11, &keyed) || ParseKeyed(serialized, 10, &keyed) || ParseKeyed(serialized, 9, &keyed) || ParseKeyed(serialized, 8, &keyed))
+  if (ParseKeyed(serialized, 13, &keyed) || ParseKeyed(serialized, 12, &keyed) || ParseKeyed(serialized, 11, &keyed) || ParseKeyed(serialized, 10, &keyed) || ParseKeyed(serialized, 9, &keyed) || ParseKeyed(serialized, 8, &keyed))
     return PreferencesLoadResult{std::move(keyed), PreferencesLoadStatus::kLoaded, std::string()};
   bool beta_updates = false;
   if (serialized.rfind("version=7\n", 0) == 0) {
@@ -200,7 +219,15 @@ Result<void> PreferencesStore::Save(const Preferences& preferences) const {
   if(!ready.ok()) return ready;
   // Never write a host that cannot be read back, including embedded newlines.
   const std::string server = ValidDownloadServer(preferences.download_server) ? preferences.download_server : std::string();
-  const std::string text = std::string("version=12\nreduce_motion=") + (preferences.reduce_motion ? "1" : "0") +
+  const auto one_line = [](std::string value) {
+    value.erase(std::remove(value.begin(), value.end(), '\n'), value.end());
+    value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
+    return value;
+  };
+  const std::string proxy_mode = preferences.download_proxy_mode == "http" || preferences.download_proxy_mode == "socks5"
+                                     ? preferences.download_proxy_mode
+                                     : std::string("off");
+  const std::string text = std::string("version=13\nreduce_motion=") + (preferences.reduce_motion ? "1" : "0") +
                            "\ntitle_store_suffix=" + (preferences.title_store_suffix ? "1" : "0") +
                            "\ncloud_saves_auto=" + (preferences.cloud_saves_auto ? "1" : "0") +
                            "\nsteam_sign_in_password=" + (preferences.steam_sign_in_password ? "1" : "0") +
@@ -214,7 +241,13 @@ Result<void> PreferencesStore::Save(const Preferences& preferences) const {
                                 : std::string(steam::kDefaultContentLanguage)) +
                            "\nhide_run_once_help=" + (preferences.hide_run_once_help ? "1" : "0") +
                            "\nhide_launcher_help=" + (preferences.hide_launcher_help ? "1" : "0") +
-                           "\nruntime_prompt_kit=" + preferences.runtime_prompt_kit + "\n";
+                           "\nruntime_prompt_kit=" + preferences.runtime_prompt_kit +
+                           "\ndownload_proxy_mode=" + proxy_mode +
+                           "\ndownload_proxy_host=" + one_line(preferences.download_proxy_host) +
+                           "\ndownload_proxy_port=" + one_line(preferences.download_proxy_port) +
+                           "\ndownload_proxy_username=" + one_line(preferences.download_proxy_username) +
+                           "\ndownload_proxy_password=" + one_line(preferences.download_proxy_password) +
+                           "\ndownload_proxy_global=" + (preferences.download_proxy_global ? "1" : "0") + "\n";
   return storage_.WriteAtomic(kPreferencesPath, Bytes(text.begin(), text.end()));
 }
 

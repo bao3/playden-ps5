@@ -38,6 +38,15 @@ struct Preferences {
   bool hide_launcher_help = false;
   // The runtime kit whose "Update your games" prompt has been shown (its manifest SHA-256): once per kit.
   std::string runtime_prompt_kit;
+  // Downloads proxy. "off" (the default), "http", or "socks5". Host and port are used only when the
+  // mode is not off. The password is optional and is stored in this file; it is never written to logs.
+  std::string download_proxy_mode = "off";
+  std::string download_proxy_host;
+  std::string download_proxy_port;
+  std::string download_proxy_username;
+  std::string download_proxy_password;
+  // Off: the proxy is for downloads only. On: Steam sign-in and other external connections use it too.
+  bool download_proxy_global = false;
 };
 
 enum class PreferencesLoadStatus {

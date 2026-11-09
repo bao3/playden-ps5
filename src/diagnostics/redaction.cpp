@@ -17,6 +17,8 @@ const char* AuthMessage(steam::AuthError error) {
       return "Steam is limiting sign-in attempts. Wait a while before you try again, or use the QR code.";
     case steam::AuthError::kSignInRefused: return "Steam did not allow this sign-in. Try the QR code instead.";
     case steam::AuthError::kSignInTimedOut: return "The sign-in timed out. Try again.";
+    case steam::AuthError::kProxy:
+      return "The proxy failed. Check Settings, Downloads, and try again.";
   }
   return "Steam sign-in failed.";
 }

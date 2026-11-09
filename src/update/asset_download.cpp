@@ -48,6 +48,7 @@ steam::HttpResponse Get(const DownloadOptions& options, const std::string& url, 
   if (!range.empty()) request.headers.emplace_back("Range", "bytes=" + range);
   request.timeout_ms = 120000;
   request.max_response_bytes = limit;
+  request.download_proxy = true;
   static const std::atomic<bool> never{false};
   return options.fetch(request, options.cancel ? *options.cancel : never);
 }

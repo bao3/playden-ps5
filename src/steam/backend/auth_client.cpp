@@ -150,6 +150,7 @@ AuthError AuthClient::Post(const char* method, const std::vector<std::uint8_t>& 
     if (hooks_.failure) hooks_.failure(method, response.status_code, eresult);
     return error;
   };
+  if (response.error == HttpError::kProxyFailed) return report(AuthError::kProxy, 0);
   if (!response.ok()) return report(AuthError::kNetwork, 0);
   if (response.status_code == 401 || response.status_code == 403)
     return report(AuthError::kRejected, 0);

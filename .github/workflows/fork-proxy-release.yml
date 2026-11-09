@@ -1,0 +1,121 @@
+# Fork-only build of the downloads proxy. This does not publish to leolobato/playden-ps5.
+name: Fork proxy release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [cursor/downloads-proxy-8f6b]
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install the host toolchain
+        run: brew install cmake ninja pkgconf sdl2-compat
+      - name: Build and run the proxy tests
+        run: |
+          set -euo pipefail
+          scripts/build-homebrew.sh
+          ctest --preset homebrew-host --output-on-failure \
+            -R '^(preferences|network_proxy|proxy_transport|http_client|cm_client|homebrew_library_model)$'
+
+  ps5-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install the PS5 cross toolchain packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang cmake curl git ninja-build \
+            python3 unzip zip llvm-18 libdigest-sha-perl
+      - name: Build the PS5 package
+        env:
+          PLAYDEN_PRERELEASE: beta.9001
+        run: |
+          set -euo pipefail
+          scripts/fetch-deps.sh
+          scripts/build-lapy-helper.sh
+          scripts/build-homebrew-ps5.sh
+          version=$(tr -d '[:space:]' < build/homebrew-ps5/dist/FAKE77031/playden-version)
+          test "$version" = "0.11.0-beta.9001"
+          scripts/package-release-zip.sh
+      - name: Assemble the release files
+        run: |
+          set -euo pipefail
+          cd build/release
+          curl --fail --location --retry 3 \
+            -o playden-kit-0.20.zip \
+            https://github.com/leolobato/playden-ps5/releases/download/v0.11.0-beta.1/playden-kit-0.20.zip
+          echo "959acf877a82b2711454fd62ba4a9a7c0476ee24627e92511283aeb54ace5a46  playden-kit-0.20.zip" | sha256sum -c
+          python3 "$GITHUB_WORKSPACE/tools/write_update_manifest.py" \
+            --app-zip playden-ps5-0.11.0-beta.9001.zip \
+            --kit-zip playden-kit-0.20.zip \
+            --kit-revision 0.20 \
+            --min-from 0.6.0 \
+            --tag v0.11.0-beta.9001 \
+            --notes "Fork build 0.11.0-beta.9001 adds a downloads proxy with an optional global scope. It is not an official Playden release. Settings, Playden updates still checks the upstream Playden releases and can replace this build when a newer upstream version is published. The runtime kit is 0.20, unchanged." \
+            --out playden-update.json
+          sha256sum playden-ps5-0.11.0-beta.9001.zip playden-kit-0.20.zip playden-update.json > SHA256SUMS
+          unzip -l playden-ps5-0.11.0-beta.9001.zip > zip-listing.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: playden-ps5-0.11.0-beta.9001
+          path: |
+            build/release/playden-ps5-0.11.0-beta.9001.zip
+            build/release/playden-kit-0.20.zip
+            build/release/playden-update.json
+            build/release/SHA256SUMS
+          if-no-files-found: error
+
+  publish:
+    needs: [host-tests, ps5-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: playden-ps5-0.11.0-beta.9001
+          path: release
+      - name: Publish the fork pre-release once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c SHA256SUMS
+          if gh release view v0.11.0-beta.9001 >/dev/null 2>&1; then
+            echo "v0.11.0-beta.9001 already exists; leaving its assets unchanged"
+            gh release view v0.11.0-beta.9001 --json url,assets
+            exit 0
+          fi
+          gh release create v0.11.0-beta.9001 \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Playden for PS5 0.11.0-beta.9001 (fork proxy)" \
+            --notes "$(cat <<'EOF'
+          Fork build of bao3/playden-ps5. This is not an official Playden release and it is not marked latest.
+
+          Settings, Downloads can use an HTTP or SOCKS5 proxy. Global proxy is off unless you turn it on. Off keeps sign-in direct. On also sends Steam sign-in, including the CM WebSocket, through the proxy. 127.0.0.1 stays direct.
+
+          The in-app updater still checks the upstream Playden releases. A newer upstream version can replace this build. The runtime kit file is the existing 0.20 zip, verified by SHA-256, not a new kit.
+
+          Install by copying FAKE77031 from playden-ps5-0.11.0-beta.9001.zip to /data/homebrew/FAKE77031. This build was not run on a console.
+          EOF
+          )" \
+            playden-ps5-0.11.0-beta.9001.zip \
+            playden-kit-0.20.zip \
+            playden-update.json \
+            SHA256SUMS

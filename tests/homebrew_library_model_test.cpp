@@ -1880,8 +1880,10 @@ void live_storage_section_and_installed_games() {
     std::vector<std::string> downloads;
     for (const auto& row : model.view().rows) if (row.section == "Downloads") downloads.push_back(row.key);
     check(downloads == std::vector<std::string>{"settings-content-language", "settings-downloads-slow",
-                                                "settings-download-server"},
-          "Downloads holds the download language, the slow-network toggle and the download server");
+                                                "settings-download-server", "settings-proxy-mode", "settings-proxy-host",
+                                                "settings-proxy-port", "settings-proxy-username", "settings-proxy-password",
+                                                "settings-proxy-global"},
+          "Downloads holds the download language, the slow-network toggle, the download server and the proxy");
     {
         const auto* language = find_row(model, "settings-content-language");
         check(language->title == "Download language" && language->value == "English" &&
@@ -1957,9 +1959,9 @@ void live_storage_section_and_installed_games() {
               model.view().rows[static_cast<std::size_t>(model.view().focused_row)].section == "Storage",
           "Up on Storage's first row does not leave the section");
     if (model.state().navigation.tabs_focused) model.action("down");
-    check(model.action("focus:settings-download-server"), "Download server is focused");
+    check(model.action("focus:settings-proxy-global"), "Global proxy is focused");
     model.action("down");
-    check(model.state().navigation.focus_key == "settings-download-server", "Down on Downloads' last row stays on it");
+    check(model.state().navigation.focus_key == "settings-proxy-global", "Down on Downloads' last row stays on it");
     model.action("left");
     model.action("down");
     model.action("right");
@@ -4478,6 +4480,52 @@ void live_game_update() {
           "after the update, no button and Play again");
 }
 
+void live_proxy_settings() {
+    auto model = make_live();
+    model.action("l1");
+    check(find_row(model, "settings-proxy-mode")->value == "Off" &&
+              !find_row(model, "settings-proxy-global")->selected,
+          "the proxy starts off and is not global");
+    activate(model, "settings-proxy-mode");
+    check(find_row(model, "settings-proxy-mode")->value == "Off", "HTTP waits for a host and port");
+    activate(model, "settings-proxy-host");
+    model.text("203.0.113.5");
+    check(model.action("done"), "the host is entered");
+    activate(model, "settings-proxy-port");
+    model.text("8080");
+    check(model.action("done"), "the port is entered");
+    activate(model, "settings-proxy-mode");
+    check(find_row(model, "settings-proxy-mode")->value == "HTTP", "HTTP is selected once the endpoint is valid");
+    activate(model, "settings-proxy-password");
+    model.text("secret-value");
+    check(model.action("done"), "a password without a username is rejected");
+    check(find_row(model, "settings-proxy-password")->value == "Not set" &&
+              model.ExportPreferences().download_proxy_password.empty(),
+          "the rejected password is not saved");
+    activate(model, "settings-proxy-username");
+    model.text("proxyuser");
+    check(model.action("done"), "the username is entered");
+    activate(model, "settings-proxy-password");
+    model.text("secret-value");
+    check(model.action("done"), "the password is entered");
+    check(find_row(model, "settings-proxy-password")->value == "Saved" &&
+              find_row(model, "settings-proxy-password")->value.find("secret-value") == std::string::npos &&
+              model.ExportPreferences().download_proxy_password == "secret-value",
+          "the password is saved and the row does not show it");
+    activate(model, "settings-proxy-global");
+    check(model.ExportPreferences().download_proxy_global && model.ExportPreferences().download_proxy_mode == "http",
+          "global proxy is exported with the HTTP mode");
+    auto restarted = make_live();
+    playden::PreferencesLoadResult loaded;
+    loaded.preferences = model.ExportPreferences();
+    check(restarted.ApplyPreferences(restarted.BeginPreferencesLoad(), loaded), "saved proxy preferences apply");
+    restarted.action("l1");
+    check(find_row(restarted, "settings-proxy-mode")->value == "HTTP" &&
+              find_row(restarted, "settings-proxy-global")->selected &&
+              find_row(restarted, "settings-proxy-password")->value == "Saved",
+          "reloading preferences restores the proxy without showing the password");
+}
+
 int main() {
     live_filters_sheet_sections();
     live_game_update();
@@ -4492,6 +4540,7 @@ int main() {
     live_page_matches_install_sheet();
     leftover_titles_require_confirmation_and_follow_the_queue();
     live_download_server_picker();
+    live_proxy_settings();
     live_import_sheet_sends_requests();
     live_import_choice_and_details();
     store_art_follows_the_store();

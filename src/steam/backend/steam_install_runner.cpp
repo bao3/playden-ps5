@@ -130,6 +130,8 @@ std::string SteamInstallRunner::DiscardUpdate(const std::string& root) {
   return ok ? std::string() : failure;
 }
 
+const char* OutcomeFailureText(InstallError error, const std::string& detail);
+
 std::optional<InstallRunner::Result> SteamInstallRunner::FinishUpdate(const std::string& root, const std::atomic<bool>& cancel,
                                                                       const std::function<void(InstallStep)>& step) {
   const auto state = installs::ReadUpdateState(root);
@@ -144,9 +146,24 @@ std::optional<InstallRunner::Result> SteamInstallRunner::FinishUpdate(const std:
   Result result;
   result.ok = outcome.error == InstallError::kNone;
   result.canceled = outcome.error == InstallError::kCanceled;
-  result.failure = InstallFailureText(outcome.error);
+  result.failure = OutcomeFailureText(outcome.error, outcome.detail);
   result.install_bytes = outcome.progress.install_total;
   return result;
+}
+
+bool RetryableReach(CmError error) {
+  return error == CmError::kNetwork || error == CmError::kTimeout || error == CmError::kProxy;
+}
+
+const char* ReachFailureText(CmError error) {
+  return error == CmError::kProxy ? "The proxy failed. Check Settings, Downloads, and resume."
+                                  : "Could not reach Steam. Resume to try again.";
+}
+
+const char* OutcomeFailureText(InstallError error, const std::string& detail) {
+  if (detail.find("proxy_failed") != std::string::npos)
+    return "The proxy failed. Check Settings, Downloads, and resume.";
+  return InstallFailureText(error);
 }
 
 const char* InstallFailureText(InstallError error) {
@@ -310,8 +327,8 @@ InstallRunner::Result SteamInstallRunner::Run(const StoredSession& session, std:
   }
   if (!info.ok()) {
     log("app_info", CmErrorName(info.error), "");
-    result.failure = "Could not reach Steam. Resume to try again.";
-    result.retry_later = info.error == CmError::kNetwork || info.error == CmError::kTimeout;
+    result.failure = ReachFailureText(info.error);
+    result.retry_later = RetryableReach(info.error);
     return result;
   }
   const auto buffer = info.buffers.find(id);
@@ -364,8 +381,8 @@ InstallRunner::Result SteamInstallRunner::Run(const StoredSession& session, std:
     if (const auto record = installs::ReadInstallRecord(root + "/" + DepotInstaller::kInstallRecord);
         record && UpdateNeedsUnfetchedDlc(*record, id, unfetched)) {
       log("dlc_app_info", "update-blocked", "");
-      result.failure = "Could not reach Steam. Resume to try again.";
-      result.retry_later = dlc_error == CmError::kNetwork || dlc_error == CmError::kTimeout;
+      result.failure = ReachFailureText(dlc_error);
+      result.retry_later = RetryableReach(dlc_error);
       return result;
     }
   // What the player turned off: this install's choice, and for an update what its install left out.
@@ -421,8 +438,10 @@ InstallRunner::Result SteamInstallRunner::Run(const StoredSession& session, std:
   }
   if (!entitlements.ok()) {
     log("entitlements", CmErrorName(entitlements.error), "");
-    result.failure = "Could not read this account's licenses. Resume to try again.";
-    result.retry_later = entitlements.error == CmError::kNetwork || entitlements.error == CmError::kTimeout;
+    result.failure = entitlements.error == CmError::kProxy
+                         ? "The proxy failed. Check Settings, Downloads, and resume."
+                         : "Could not read this account's licenses. Resume to try again.";
+    result.retry_later = RetryableReach(entitlements.error);
     return result;
   }
   if (entitlements.skipped_packages)
@@ -573,7 +592,7 @@ InstallRunner::Result SteamInstallRunner::Run(const StoredSession& session, std:
   // A running game holds the update back: it waits, its downloads kept, and tries again.
   result.retry_later = outcome.error == InstallError::kNetwork || outcome.error == InstallError::kGameRunning;
   if (outcome.error == InstallError::kGameRunning) result.waiting = kWaitingForGame;
-  result.failure = InstallFailureText(outcome.error);
+  result.failure = OutcomeFailureText(outcome.error, outcome.detail);
   result.install_bytes = outcome.progress.install_total;
   return result;
 }

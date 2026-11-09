@@ -186,10 +186,12 @@ void SignInMethodPersistsAndVersionThreeOpensQr() {
   Check(store.Save(preferences).ok(), "sign-in method preference saves");
   const auto saved = storage.Read("preferences.conf");
   Check(saved.ok() && std::string(saved.value().begin(), saved.value().end()) ==
-                          "version=12\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=1\nsteam_sign_in_password=1\n"
+                          "version=13\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=1\nsteam_sign_in_password=1\n"
                           "downloads_slow_network=0\nsteam_stay_signed_in=1\nbeta_updates=0\ndownload_server=\nweb_access=1\n"
-                          "content_language=english\nhide_run_once_help=0\nhide_launcher_help=0\nruntime_prompt_kit=\n",
-        "version 12 format includes Automatic download server, web access and English");
+                          "content_language=english\nhide_run_once_help=0\nhide_launcher_help=0\nruntime_prompt_kit=\n"
+                          "download_proxy_mode=off\ndownload_proxy_host=\ndownload_proxy_port=\n"
+                          "download_proxy_username=\ndownload_proxy_password=\ndownload_proxy_global=0\n",
+        "version 13 format includes the proxy, off by default");
   const auto loaded = store.Load();
   Check(loaded.status == playden::PreferencesLoadStatus::kLoaded && loaded.preferences.steam_sign_in_password &&
             loaded.preferences.cloud_saves_auto,
@@ -546,6 +548,41 @@ void ContentLanguagePersistsAndOlderVersionsStayEnglish() {
   }
 }
 
+void ProxyPreferencesRoundTripAndOldFilesStayOff() {
+  TemporaryDirectory directory;
+  playden::Storage storage(directory.path());
+  playden::PreferencesStore store(storage);
+  const std::string version_12 =
+      "version=12\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=0\nsteam_sign_in_password=0\n"
+      "downloads_slow_network=0\nsteam_stay_signed_in=1\nbeta_updates=0\ndownload_server=\nweb_access=1\n"
+      "content_language=english\nhide_run_once_help=0\nhide_launcher_help=0\nruntime_prompt_kit=\n";
+  Check(storage.WriteAtomic("preferences.conf", playden::Bytes(version_12.begin(), version_12.end())).ok(),
+        "version 12 fixture is written");
+  const auto old = store.Load();
+  Check(old.status == playden::PreferencesLoadStatus::kLoaded && old.preferences.download_proxy_mode == "off" &&
+            old.preferences.download_proxy_host.empty() && !old.preferences.download_proxy_global,
+        "a version 12 file loads with the proxy off");
+  playden::Preferences preferences = old.preferences;
+  preferences.download_proxy_mode = "socks5";
+  preferences.download_proxy_host = "203.0.113.5";
+  preferences.download_proxy_port = "1080";
+  preferences.download_proxy_username = "proxyuser";
+  preferences.download_proxy_password = "p=ass word";
+  preferences.download_proxy_global = true;
+  Check(store.Save(preferences).ok(), "proxy preferences save");
+  const auto loaded = store.Load();
+  Check(loaded.status == playden::PreferencesLoadStatus::kLoaded && loaded.preferences.download_proxy_mode == "socks5" &&
+            loaded.preferences.download_proxy_host == "203.0.113.5" && loaded.preferences.download_proxy_port == "1080" &&
+            loaded.preferences.download_proxy_username == "proxyuser" &&
+            loaded.preferences.download_proxy_password == "p=ass word" && loaded.preferences.download_proxy_global,
+        "proxy host, port, auth and global scope round-trip");
+  auto text = std::string(storage.Read("preferences.conf").value().begin(), storage.Read("preferences.conf").value().end());
+  const auto mode = text.find("download_proxy_mode=");
+  text.replace(mode, std::string("download_proxy_mode=socks5").size(), "download_proxy_mode=bogus");
+  Check(storage.WriteAtomic("preferences.conf", playden::Bytes(text.begin(), text.end())).ok(), "bad proxy mode is written");
+  Check(store.Load().status == playden::PreferencesLoadStatus::kDefaultCorrupt, "an unknown proxy mode is corrupt");
+}
+
 }  // namespace
 
 int main() {
@@ -559,6 +596,7 @@ int main() {
   CorruptPreferencesRestoreDefaultsWithVisibleDiagnostic();
   TitleStoreSuffixPersistsAndVersionOneStillLoads();
   SignInMethodPersistsAndVersionThreeOpensQr();
+  ProxyPreferencesRoundTripAndOldFilesStayOff();
   StaySignedInDefaultsOnAndPersistsOff();
   VersionEightLoadsDownloadServerWithoutResettingOtherFields();
   VersionNineKeepsWebAccessAndVersionEightTurnsItOn();

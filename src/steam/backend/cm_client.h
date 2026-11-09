@@ -31,6 +31,7 @@ enum class CmError {
   kRejected,  // logon refused; never treated as revoked credentials (the reference ignores it)
   kProtocol,
   kTimeout,
+  kProxy,  // the configured proxy failed; the connection was not opened directly
 };
 
 const char* CmErrorName(CmError error);
@@ -188,7 +189,7 @@ struct CmClientHooks {
 // One logged-on CM connection that several CmClients share, as Steam's own client keeps one for the
 // whole run. Calls take turns on it. Between calls a background thread answers the server and sends
 // heartbeats, so the session stays logged on while Playden runs; it is opened again only when the
-// credentials change or Steam drops it. Destroying the session logs off.
+// credentials change, the downloads proxy changes, or Steam drops it. Destroying the session logs off.
 class CmSharedSession;
 std::shared_ptr<CmSharedSession> MakeCmSharedSession();
 // How many times Steam pushed a license list on the shared session whose packages differ from the

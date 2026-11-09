@@ -864,6 +864,13 @@ struct State {
     // Empty: Steam default (Steam's order); kFastestDownloadServer: Fastest (raced at each download); otherwise
     // the chosen provider's stable identifier.
     std::string download_server;
+    // Downloads proxy. "off", "http", or "socks5". Global sends Steam sign-in through it as well.
+    std::string proxy_mode = "off";
+    std::string proxy_host;
+    std::string proxy_port;
+    std::string proxy_username;
+    std::string proxy_password;
+    bool proxy_global = false;
     bool hide_run_once_help = false;  // "Don't show again" on Run launcher or setup's dialog
     std::string runtime_prompt_kit;  // the kit whose runtime kit prompt was answered (its manifest SHA-256)
     bool hide_launcher_help = false;  // ...and on the one for turning on Start through a launcher

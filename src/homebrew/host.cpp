@@ -25,6 +25,7 @@
 #include "steam/backend/steam_install_runner.h"
 #include "steam/backend/steam_cloud_runner.h"
 #include "steam/backend/library_client.h"
+#include "steam/backend/network_proxy.h"
 #include "steam/local_session_repository.h"
 #include "library/cache.h"
 
@@ -551,6 +552,12 @@ int main(int argc, char** argv) {
         owned_library = std::make_unique<playden::steam::LibraryClient>(PLAYDEN_HOMEBREW_CA_BUNDLE);
         library_sessions = std::make_unique<playden::LocalSessionRepository>(options->data_directory.string(), playden::LocalSessionRepository::DiagnosticReport{}, session_vault.get());
         library_storage = std::make_unique<playden::Storage>(options->data_directory.string());
+        {
+            const auto saved = playden::PreferencesStore(*library_storage).Load().preferences;
+            playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
+                saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
+                saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
+        }
         cm_client = std::make_unique<playden::steam::CmClient>(PLAYDEN_HOMEBREW_CA_BUNDLE, *library_storage);
         cm_client->SetOwner("library");
         cm_client->SetSharedSession(steam_cm);
@@ -567,6 +574,9 @@ int main(int argc, char** argv) {
         {
             // A download resumed at startup starts before the UI has loaded the settings: it reads the saved ones.
             const auto saved = preferences->Load().preferences;
+            playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
+                saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
+                saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
             download_tuning_state.downloads_slow_network.store(saved.downloads_slow_network);
             {
                 std::lock_guard lock(download_tuning_state.mutex);
@@ -881,6 +891,10 @@ int main(int argc, char** argv) {
         // Until the UI has the saved settings, its defaults would replace them.
         if (simulation.PreferencesLoaded()) {
             download_tuning_state.downloads_slow_network.store(simulation.state().downloads_slow_network);
+            playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
+                simulation.state().proxy_mode, simulation.state().proxy_host, simulation.state().proxy_port,
+                simulation.state().proxy_username, simulation.state().proxy_password,
+                simulation.state().proxy_global));
             {
                 std::lock_guard lock(download_tuning_state.mutex);
                 download_tuning_state.download_server = simulation.state().download_server;
