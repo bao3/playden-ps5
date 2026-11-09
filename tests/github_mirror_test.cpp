@@ -16,12 +16,16 @@ using playden::update::StripSensitiveHeaders;
 
 const char* kRelease = "https://github.com/bao3/playden-ps5/releases/download/v0.11.0-beta.9002/SHA256SUMS";
 const char* kRewritten =
-    "https://gh.heibang.club/github.com/bao3/playden-ps5/releases/download/v0.11.0-beta.9002/SHA256SUMS";
+    "https://gh.heibang.club/https://github.com/bao3/playden-ps5/releases/download/v0.11.0-beta.9002/SHA256SUMS";
+const char* kApi = "https://api.github.com/repos/bao3/playden-ps5/releases?per_page=100";
+const char* kApiRewritten =
+    "https://gh.heibang.club/https://api.github.com/repos/bao3/playden-ps5/releases?per_page=100";
 
 GithubMirrorSettings Mirror() {
   GithubMirrorSettings mirror;
   mirror.enabled = true;
   mirror.base = "https://gh.heibang.club";
+  mirror.api_base = "https://gh.heibang.club/https://api.github.com";
   return mirror;
 }
 }  // namespace
@@ -31,20 +35,26 @@ int main() {
   const auto rewritten = DecideGithubMirror(kRelease, mirror, false);
   CHECK(rewritten.action == MirrorAction::kRewrite);
   CHECK(rewritten.url == kRewritten);
-  CHECK(rewritten.url.find("/https://") == std::string::npos);
-  CHECK(rewritten.url.find("/http://") == std::string::npos);
+  CHECK(rewritten.origin == "https://gh.heibang.club");
 
-  const auto slashed = DecideGithubMirror(kRelease, GithubMirrorSettings{true, "https://gh.heibang.club/"}, false);
+  const auto slashed = DecideGithubMirror(kRelease, GithubMirrorSettings{true, "https://gh.heibang.club/", mirror.api_base}, false);
   CHECK(slashed.action == MirrorAction::kRewrite && slashed.url == kRewritten);
 
-  const auto port = DecideGithubMirror(kRelease, GithubMirrorSettings{true, "https://mirror.example:8443"}, false);
+  const auto port = DecideGithubMirror(kRelease, GithubMirrorSettings{true, "https://mirror.example:8443", mirror.api_base}, false);
   CHECK(port.action == MirrorAction::kRewrite);
   CHECK(port.url ==
-        "https://mirror.example:8443/github.com/bao3/playden-ps5/releases/download/v0.11.0-beta.9002/SHA256SUMS");
+        "https://mirror.example:8443/https://github.com/bao3/playden-ps5/releases/download/v0.11.0-beta.9002/SHA256SUMS");
 
-  for (const char* kept : {"https://api.github.com/repos/bao3/playden-ps5/releases/latest",
-                           "https://api.github.com/repos/bao3/playden-ps5/releases?per_page=100",
-                           "https://github.com/bao3/playden-ps5/releases/tag/v0.11.0-beta.9002",
+  const auto api = DecideGithubMirror(kApi, mirror, false);
+  CHECK(api.action == MirrorAction::kRewrite && api.url == kApiRewritten && api.origin == "https://gh.heibang.club");
+  const auto api_paused = DecideGithubMirror(kApi, mirror, true);
+  CHECK(api_paused.action == MirrorAction::kKeep && api_paused.url == kApi);
+  GithubMirrorSettings no_api = mirror;
+  no_api.api_base.clear();
+  CHECK(DecideGithubMirror(kApi, no_api, false).action == MirrorAction::kReject);
+  CHECK(DecideGithubMirror(kRelease, no_api, false).action == MirrorAction::kRewrite);
+
+  for (const char* kept : {"https://github.com/bao3/playden-ps5/releases/tag/v0.11.0-beta.9002",
                            "https://release-assets.githubusercontent.com/asset",
                            "https://objects.githubusercontent.com/github-production-release-asset/x",
                            "http://github.com/bao3/playden-ps5/releases/download/v1/a.zip"}) {
@@ -65,11 +75,15 @@ int main() {
                           "https://gh.heibang.club?q=1", "https://127.0.0.1", "https://localhost",
                           "https://github.com", "https://api.github.com", "https://evil.githubusercontent.com", ""}) {
     CHECK(!playden::update::ValidGithubMirrorBase(bad));
-    const auto rejected = DecideGithubMirror(kRelease, GithubMirrorSettings{true, bad}, false);
+    const auto rejected = DecideGithubMirror(kRelease, GithubMirrorSettings{true, bad, {}}, false);
     CHECK(rejected.action == MirrorAction::kReject);
   }
   CHECK(playden::update::ValidGithubMirrorBase("https://gh.heibang.club"));
   CHECK(std::string(playden::update::kDefaultGithubMirrorBase) == "https://gh.heibang.club");
+  CHECK(std::string(playden::update::kDefaultGithubApiBase) == "https://gh.heibang.club/https://api.github.com");
+  CHECK(playden::update::ValidGithubApiBase("https://gh.heibang.club/https://api.github.com/"));
+  CHECK(!playden::update::ValidGithubApiBase("https://gh.heibang.club/https://github.com"));
+  CHECK(!playden::update::ValidGithubApiBase("https://127.0.0.1/https://api.github.com"));
   CHECK(std::string(playden::update::kUpdateLatestReleaseUrl) ==
         "https://api.github.com/repos/bao3/playden-ps5/releases/latest");
   CHECK(std::string(playden::update::kUpdateReleasesPage) == "https://github.com/bao3/playden-ps5/releases");

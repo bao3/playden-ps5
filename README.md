@@ -187,10 +187,11 @@ installed version is a beta, Playden still offers a newer beta from that reposit
 not hide those, and it does not point the check back at another repository. After a stable version is installed,
 Beta updates chooses whether later betas are offered. Updates never downgrade Playden.
 
-Playden reads release information from GitHub's API. That request stays direct unless Global proxy is on. Release
-files can come from the GitHub mirror in Settings › Downloads. This build starts with that mirror on, at
-`https://gh.heibang.club`. An HTTP or SOCKS5 proxy pauses the mirror until Proxy is Off. The bytes are still
-checked against the checksum GitHub's API published. The mirror is not used for the API itself.
+Playden reads release information through the GitHub mirror in Settings › Downloads when that mirror is on and
+Proxy is Off. This build starts with the mirror on. Release files use `https://gh.heibang.club/` followed by the
+full GitHub URL. The update check uses `https://gh.heibang.club/https://api.github.com`. An HTTP or SOCKS5 proxy
+pauses both until Proxy is Off. GitHub's own rate limit still applies. A matching checksum shows that the file
+matches the details returned by the same mirror. It is not a separate signature from GitHub.
 
 The previous app and kit are kept until the next update, in `/data/playden/self-update/backup/` and
 `/data/playden/kits/.previous-*`. Settings › Updates › **Go back to Playden <version>** puts them back: Playden

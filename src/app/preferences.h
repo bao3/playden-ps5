@@ -48,10 +48,12 @@ struct Preferences {
   std::string download_proxy_password;
   // Off: the proxy is for downloads only. On: Steam sign-in and other external connections use it too.
   bool download_proxy_global = false;
-  // GitHub release downloads. On uses github_mirror_base when the downloads proxy is Off.
-  // API metadata is not sent there. Older preference files get this build's defaults.
+  // GitHub release downloads and the update check. On uses these addresses when the downloads proxy is Off.
+  // Older preference files get this build's defaults. A matching checksum then compares two answers from
+  // the same mirror; it is not a separate check against GitHub.
   bool github_mirror = true;
   std::string github_mirror_base = update::kDefaultGithubMirrorBase;
+  std::string github_api_base = update::kDefaultGithubApiBase;
 };
 
 enum class PreferencesLoadStatus {

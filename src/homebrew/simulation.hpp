@@ -874,6 +874,7 @@ struct State {
     // GitHub release downloads. The address is kept when a downloads proxy turns the mirror off.
     bool github_mirror = true;
     std::string github_mirror_base = playden::update::kDefaultGithubMirrorBase;
+    std::string github_api_base = playden::update::kDefaultGithubApiBase;
     bool hide_run_once_help = false;  // "Don't show again" on Run launcher or setup's dialog
     std::string runtime_prompt_kit;  // the kit whose runtime kit prompt was answered (its manifest SHA-256)
     bool hide_launcher_help = false;  // ...and on the one for turning on Start through a launcher

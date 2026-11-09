@@ -50,6 +50,14 @@ std::optional<std::string> HashBytes(const UpdateConfig& config, std::string_vie
   return result;
 }
 
+const char* GithubFetchMessage(const std::string& error, const char* fallback) {
+  if (error.find("GitHub rate limit") != std::string::npos)
+    return "GitHub's rate limit stopped the update check. Try again later.";
+  if (error.find("did not return JSON") != std::string::npos || error.find("web page") != std::string::npos)
+    return "The update check did not return release information.";
+  return fallback;
+}
+
 bool DigestMatches(const UpdateConfig& config, std::string_view bytes, const std::string& expected) {
   if (!IsSha256(expected)) return false;
   const auto actual = HashBytes(config, bytes);
@@ -618,13 +626,13 @@ void UpdateService::DoCheck(bool user_asked) {
   std::optional<std::vector<Release>> releases;  // every release, when read: betas, or a kit zip left out
   if (follow_prereleases) {
     releases = FetchReleases(&error);
-    if (!releases) return Fail("Playden could not read the releases on GitHub.", error);
+    if (!releases) return Fail(GithubFetchMessage(error, "Playden could not read the releases on GitHub."), error);
     for (const auto& candidate : *releases)
       if (!candidate.draft && (!release || release->version < candidate.version)) release = candidate;
   } else {
     const auto body = local ? read_local("release.json")
                             : FetchSmall(config_.latest_release_url, 2 << 20, options, "application/vnd.github+json", &error, false);
-    if (!body) return Fail("Playden could not reach GitHub to look for updates.", error);
+    if (!body) return Fail(GithubFetchMessage(error, "Playden could not reach GitHub to look for updates."), error);
     release = ParseRelease(*body, &error);
     if (!release) return Fail("The latest release on GitHub could not be read.", error);
     if (release->draft || release->prerelease || release->version.beta) release.reset();
@@ -646,7 +654,7 @@ void UpdateService::DoCheck(bool user_asked) {
                                    : FetchSmall(asset->url, 256 << 10, options, "application/octet-stream", &error, true);
   if (manifest_text && !local && IsSha256(asset->sha256) && !DigestMatches(config_, *manifest_text, asset->sha256))
     return Fail("The update information did not match its checksum.", "manifest digest");
-  if (!manifest_text) return Fail("Playden could not read the update information.", error);
+  if (!manifest_text) return Fail(GithubFetchMessage(error, "Playden could not read the update information."), error);
   const auto manifest = ParseUpdateManifest(*manifest_text, &error);
   if (!manifest) return Fail("The update information of " + release->tag + " is not valid.", error);
   if (manifest->app_version != release->version || manifest->title_id != config_.title_id)
@@ -897,7 +905,7 @@ void UpdateService::DoCheckKit() {
   };
   std::string error;
   const auto releases = FetchReleases(&error);
-  if (!releases) return FailKit("Playden could not reach GitHub to download its runtime kit.", error);
+  if (!releases) return FailKit(GithubFetchMessage(error, "Playden could not reach GitHub to download its runtime kit."), error);
   // The running version's release names its kit. A nightly has no release: its base, or the newest release
   // before it, stands in, and is used only if it names the same kit (checked below).
   const Release* own = nullptr;
@@ -924,7 +932,7 @@ void UpdateService::DoCheckKit() {
   } else {
     error = std::string("cannot read ") + kUpdateManifestAsset;
   }
-  if (!manifest_text) return FailKit("Playden could not read the runtime kit information.", error);
+  if (!manifest_text) return FailKit(GithubFetchMessage(error, "Playden could not read the runtime kit information."), error);
   const auto manifest = ParseUpdateManifest(*manifest_text, &error);
   if (!manifest) return FailKit("The runtime kit information of " + own->tag + " is not valid.", error);
   if (manifest->kit.kit_id != config_.kit_id || manifest->kit.manifest_sha256 != config_.kit_manifest_sha256)

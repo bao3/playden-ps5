@@ -191,8 +191,9 @@ void SignInMethodPersistsAndVersionThreeOpensQr() {
                           "content_language=english\nhide_run_once_help=0\nhide_launcher_help=0\nruntime_prompt_kit=\n"
                           "download_proxy_mode=off\ndownload_proxy_host=\ndownload_proxy_port=\n"
                           "download_proxy_username=\ndownload_proxy_password=\ndownload_proxy_global=0\n"
-                          "github_mirror=1\ngithub_mirror_base=https://gh.heibang.club\n",
-        "version 14 format includes the proxy and the GitHub mirror");
+                          "github_mirror=1\ngithub_mirror_base=https://gh.heibang.club\n"
+                          "github_api_base=https://gh.heibang.club/https://api.github.com\n",
+        "version 15 format includes the proxy, the GitHub mirror and the API address");
   const auto loaded = store.Load();
   Check(loaded.status == playden::PreferencesLoadStatus::kLoaded && loaded.preferences.steam_sign_in_password &&
             loaded.preferences.cloud_saves_auto,
@@ -599,7 +600,8 @@ void ProxyPreferencesRoundTripAndOldFilesStayOff() {
             migrated.preferences.download_proxy_username == "proxyuser" &&
             migrated.preferences.download_proxy_password == "secret" && migrated.preferences.download_proxy_global &&
             migrated.preferences.github_mirror &&
-            migrated.preferences.github_mirror_base == "https://gh.heibang.club",
+            migrated.preferences.github_mirror_base == "https://gh.heibang.club" &&
+            migrated.preferences.github_api_base == "https://gh.heibang.club/https://api.github.com",
         "a version 13 file keeps the proxy and beta choice and gains the mirror defaults");
   playden::Preferences custom = migrated.preferences;
   custom.github_mirror = false;

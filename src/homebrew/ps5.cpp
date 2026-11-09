@@ -358,7 +358,7 @@ int main() {
             playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
                 saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
                 saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
-            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base});
+            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base, saved.github_api_base});
         }
         playden::steam::CmClient cm_client(paths.trust_store, library_storage);
         cm_client.SetOwner("library");
@@ -380,7 +380,7 @@ int main() {
             playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
                 saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
                 saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
-            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base});
+            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base, saved.github_api_base});
             downloads_slow_network.store(saved.downloads_slow_network);
             {
                 std::lock_guard lock(download_server_mutex);
@@ -1043,8 +1043,9 @@ int main() {
                     simulation.state().proxy_mode, simulation.state().proxy_host, simulation.state().proxy_port,
                     simulation.state().proxy_username, simulation.state().proxy_password,
                     simulation.state().proxy_global));
-                playden::update::SetGithubMirror(
-                    {simulation.state().github_mirror, simulation.state().github_mirror_base});
+                playden::update::SetGithubMirror({simulation.state().github_mirror,
+                                                 simulation.state().github_mirror_base,
+                                                 simulation.state().github_api_base});
                 {
                     std::lock_guard lock(download_server_mutex);
                     download_server = simulation.state().download_server;

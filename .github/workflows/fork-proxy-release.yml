@@ -82,7 +82,7 @@ jobs:
             --kit-revision 0.20 \
             --min-from 0.6.0 \
             --tag v0.11.0-beta.9002 \
-            --notes "Fork build 0.11.0-beta.9002 checks bao3/playden-ps5 for updates, including a newer beta. Release files use the GitHub mirror at https://gh.heibang.club when the downloads proxy is Off. GitHub's API stays direct unless Global proxy is on. Checksums still come from that API. It is not an official Playden release. The runtime kit is 0.20, unchanged." \
+            --notes "Fork build 0.11.0-beta.9002 checks bao3/playden-ps5 for updates, including a newer beta, through the GitHub mirror when Proxy is Off. Release files use https://gh.heibang.club/ plus the full GitHub URL. The update check uses https://gh.heibang.club/https://api.github.com. An HTTP or SOCKS5 proxy pauses both. A matching checksum compares the file with the details from that same mirror. It is not an official Playden release. The runtime kit is 0.20, unchanged." \
             --out playden-update.json
           sha256sum playden-ps5-0.11.0-beta.9002.zip playden-kit-0.20.zip playden-update.json > SHA256SUMS
           unzip -l playden-ps5-0.11.0-beta.9002.zip > zip-listing.txt
@@ -129,7 +129,7 @@ jobs:
             --notes "$(cat <<'EOF'
           Fork build of bao3/playden-ps5. This is not an official Playden release and it is not marked latest. v0.11.0-beta.9001 is unchanged.
 
-          Settings, Downloads can use an HTTP or SOCKS5 proxy. Global proxy is off unless you turn it on. The GitHub mirror starts on at https://gh.heibang.club and applies only to release downloads, and only while Proxy is Off. GitHub's API stays direct unless Global proxy is on. Checksums still come from that API.
+          Settings, Downloads can use an HTTP or SOCKS5 proxy. Global proxy is off unless you turn it on. The GitHub mirror starts on. Release downloads use https://gh.heibang.club/ plus the full GitHub URL, and the update check uses https://gh.heibang.club/https://api.github.com, only while Proxy is Off. A matching checksum compares those two answers from the mirror. GitHub's rate limit still applies.
 
           Playden updates checks bao3/playden-ps5, including a newer beta of this build. It does not switch back to the upstream repository. The runtime kit file is the existing 0.20 zip, verified by SHA-256, not a new kit.
 

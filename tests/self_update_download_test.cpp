@@ -225,7 +225,7 @@ int main() {
   }
   FakeGitHub holder;
   holder.body = body;
-  const std::string mirrored = "https://gh.heibang.club/github.com/o/r/releases/download/v1/a.zip";
+  const std::string mirrored = "https://gh.heibang.club/https://github.com/o/r/releases/download/v1/a.zip";
   const auto ranged = [&](const std::string& bytes, const std::string& range) {
     HttpResponse response;
     if (range.rfind("bytes=", 0) != 0) {

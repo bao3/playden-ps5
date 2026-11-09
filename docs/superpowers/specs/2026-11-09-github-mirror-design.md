@@ -4,9 +4,9 @@ Approved 2026-11-09 for the fork https://github.com/bao3/playden-ps5. This is no
 
 Live checks of `https://gh.heibang.club` (from this cloud VM, not from a PS5) showed:
 
-- `https://gh.heibang.club/github.com/<owner>/<repo>/releases/download/<tag>/<file>` returns the same bytes as GitHub, including `Range` `206`.
-- `https://gh.heibang.club/https://github.com/...` returns HTTP 429 and an HTML page. That form is not used.
-- `api.github.com` is not proxied (HTTP 404). Release metadata stays on GitHub's API.
+- The mirror's current instructions put the full original URL after the mirror origin: `https://gh.heibang.club/https://github.com/...` for a file and `https://gh.heibang.club/https://api.github.com` for the API.
+- A 32-byte range of this fork's app zip matched GitHub's copy. The API path returned GitHub's own JSON rate-limit response (`x-github-media-type`, remaining 0), not a release document, because that shared address had used its anonymous quota.
+- A matching checksum compares the file with the release details from this same mirror. It is not an independent signature from GitHub.
 - The mirror serves the file itself. It does not redirect to `release-assets.githubusercontent.com`.
 
 ## Settings › Downloads
@@ -30,11 +30,13 @@ Only at request time, and only this shape:
 
 becomes:
 
-`https://<mirror-host>/github.com/<owner>/<repo>/releases/download/<tag>/<file>`
+`https://<mirror-host>/https://github.com/<owner>/<repo>/releases/download/<tag>/<file>`
 
-The stored asset URL stays the GitHub URL. `api.github.com` is never rewritten. `*.githubusercontent.com` is never rewritten. A mirror response that redirects anywhere except the same mirror host is refused, and that other host is not requested.
+`https://api.github.com/<path>?<query>` becomes `<API address><path>?<query>`. The default API address is `https://gh.heibang.club/https://api.github.com`. The update check uses it only while the mirror is on and Proxy is Off.
 
-TLS verification stays on. The SHA-256 compared with a file is the `digest` GitHub's API returned for that asset. `playden-update.json` is checked against that digest before it is parsed. A checksum is not taken from the mirror and then trusted for the same bytes.
+The stored asset URL stays the GitHub URL. `*.githubusercontent.com` is not rewritten. A mirror response that redirects anywhere except the same mirror host is refused, and that other host is not requested.
+
+TLS verification stays on. `playden-update.json` is checked against the digest named by the release details before it is parsed. When the mirror is in use, those details and the file come from the same mirror.
 
 `Authorization`, `Cookie`, `Proxy-Authorization`, `X-Api-Key`, and `X-Auth-Token` are removed from mirror requests.
 
@@ -46,18 +48,11 @@ The app looks for its own updates at `https://api.github.com/repos/bao3/playden-
 
 GitHub's `/releases/latest` omits prereleases. This fork publishes prereleases. While the installed version itself has a beta number, the check reads the release list and offers the newest release, including a newer beta. The saved Beta updates switch is not changed. A stable install still uses that switch.
 
-The API request is direct unless Global proxy is on. Release files, including `playden-update.json` and the runtime kit zip, use the mirror when the mirror is in effect, and the downloads proxy when Proxy is HTTP or SOCKS5.
+While the mirror is on and Proxy is Off, the update check and release files, including `playden-update.json` and the runtime kit zip, use the mirror. An HTTP or SOCKS5 proxy leaves both on their original GitHub URLs. The API call then stays direct unless Global proxy is on. A matching checksum shows the file and the release details agree with each other. Both came from the mirror, so this is not an independent GitHub signature.
 
 ## Preferences
 
-`preferences.conf` version 14 appends:
-
-```
-github_mirror=0|1
-github_mirror_base=
-```
-
-Versions 1–13 still load. A version 13 file keeps its proxy mode, host, port, username, password, and global flag. The new mirror fields use this build's defaults (on, `https://gh.heibang.club`). `beta_updates` is not rewritten.
+`preferences.conf` version 15 appends `github_api_base` after the version 14 mirror fields. Versions 1–14 still load. A version 13 file keeps its proxy fields. A version 14 file keeps the mirror choice. The API address defaults to `https://gh.heibang.club/https://api.github.com`. `beta_updates` is not rewritten.
 
 ## Package
 

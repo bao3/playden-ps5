@@ -1883,7 +1883,7 @@ void live_storage_section_and_installed_games() {
                                                 "settings-download-server", "settings-proxy-mode", "settings-proxy-host",
                                                 "settings-proxy-port", "settings-proxy-username", "settings-proxy-password",
                                                 "settings-proxy-global", "settings-github-mirror",
-                                                "settings-github-mirror-base"},
+                                                "settings-github-mirror-base", "settings-github-api-base"},
           "Downloads holds the download language, the slow-network toggle, the download server, the proxy and the GitHub mirror");
     {
         const auto* language = find_row(model, "settings-content-language");
@@ -1960,9 +1960,9 @@ void live_storage_section_and_installed_games() {
               model.view().rows[static_cast<std::size_t>(model.view().focused_row)].section == "Storage",
           "Up on Storage's first row does not leave the section");
     if (model.state().navigation.tabs_focused) model.action("down");
-    check(model.action("focus:settings-github-mirror-base"), "Mirror address is focused");
+    check(model.action("focus:settings-github-api-base"), "GitHub API address is focused");
     model.action("down");
-    check(model.state().navigation.focus_key == "settings-github-mirror-base", "Down on Downloads' last row stays on it");
+    check(model.state().navigation.focus_key == "settings-github-api-base", "Down on Downloads' last row stays on it");
     model.action("left");
     model.action("down");
     model.action("right");
@@ -4487,7 +4487,8 @@ void live_proxy_settings() {
     check(find_row(model, "settings-proxy-mode")->value == "Off" &&
               !find_row(model, "settings-proxy-global")->selected &&
               find_row(model, "settings-github-mirror")->selected &&
-              find_row(model, "settings-github-mirror-base")->value == "https://gh.heibang.club",
+              find_row(model, "settings-github-mirror-base")->value == "https://gh.heibang.club" &&
+              find_row(model, "settings-github-api-base")->value == "https://gh.heibang.club/https://api.github.com",
           "the proxy starts off and the GitHub mirror starts on");
     activate(model, "settings-proxy-mode");
     check(find_row(model, "settings-proxy-mode")->value == "Off", "HTTP waits for a host and port");

@@ -114,16 +114,37 @@ PreparedUrl PrepareUrl(const std::string& url) {
   const MirrorDecision decision = DecideGithubMirror(url, CurrentGithubMirror(), downloads_proxy);
   if (decision.action == MirrorAction::kReject) {
     prepared.fatal = true;
-    prepared.error = "blocked: GitHub mirror address isn't valid";
+    prepared.error = url.rfind("https://api.github.com/", 0) == 0 ? "blocked: GitHub API address isn't valid"
+                                                                  : "blocked: GitHub mirror address isn't valid";
     return prepared;
   }
   prepared.url = decision.url;
   if (decision.action == MirrorAction::kRewrite) {
     prepared.mirror = true;
-    const auto slash = prepared.url.find("/github.com/");
-    prepared.origin = slash == std::string::npos ? prepared.url : prepared.url.substr(0, slash);
+    prepared.origin = decision.origin;
   }
   return prepared;
+}
+
+bool JsonDocument(const steam::HttpResponse& response) {
+  std::string type = Header(response, "content-type");
+  for (char& c : type)
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  if (type.find("json") == std::string::npos) return false;
+  std::size_t i = 0;
+  while (i < response.body.size() && (response.body[i] == ' ' || response.body[i] == '\n' || response.body[i] == '\r' ||
+                                      response.body[i] == '\t'))
+    ++i;
+  return i < response.body.size() && (response.body[i] == '{' || response.body[i] == '[');
+}
+
+bool RateLimited(const steam::HttpResponse& response) {
+  if (response.status_code != 403 && response.status_code != 429) return false;
+  if (Header(response, "x-ratelimit-remaining") == "0") return true;
+  std::string body(response.body.begin(), response.body.end());
+  for (char& c : body)
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  return body.find("rate limit") != std::string::npos;
 }
 
 bool AcceptUrl(const std::string& url, bool mirror, const std::string& origin, std::string* error) {
@@ -222,7 +243,11 @@ std::optional<std::string> FetchSmall(const std::string& url, std::size_t limit,
         continue;
       }
       if (LooksLikeHtml(response)) {
-        *error = "download returned a web page";
+        *error = "blocked: download returned a web page";
+        return std::nullopt;
+      }
+      if (response.status_code == 403 && RateLimited(response)) {
+        *error = "blocked: GitHub rate limit";
         return std::nullopt;
       }
       if (response.status_code == 429) {
@@ -233,6 +258,10 @@ std::optional<std::string> FetchSmall(const std::string& url, std::size_t limit,
       }
       if (response.status_code != 200 || !response.ok()) {
         *error = Describe(response);
+        return std::nullopt;
+      }
+      if (accept.find("json") != std::string::npos && !JsonDocument(response)) {
+        *error = "blocked: GitHub's API did not return JSON";
         return std::nullopt;
       }
       return std::string(response.body.begin(), response.body.end());

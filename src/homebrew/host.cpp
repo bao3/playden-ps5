@@ -558,7 +558,7 @@ int main(int argc, char** argv) {
             playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
                 saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
                 saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
-            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base});
+            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base, saved.github_api_base});
         }
         cm_client = std::make_unique<playden::steam::CmClient>(PLAYDEN_HOMEBREW_CA_BUNDLE, *library_storage);
         cm_client->SetOwner("library");
@@ -579,7 +579,7 @@ int main(int argc, char** argv) {
             playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
                 saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
                 saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
-            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base});
+            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base, saved.github_api_base});
             download_tuning_state.downloads_slow_network.store(saved.downloads_slow_network);
             {
                 std::lock_guard lock(download_tuning_state.mutex);
@@ -898,7 +898,8 @@ int main(int argc, char** argv) {
                 simulation.state().proxy_mode, simulation.state().proxy_host, simulation.state().proxy_port,
                 simulation.state().proxy_username, simulation.state().proxy_password,
                 simulation.state().proxy_global));
-            playden::update::SetGithubMirror({simulation.state().github_mirror, simulation.state().github_mirror_base});
+            playden::update::SetGithubMirror({simulation.state().github_mirror, simulation.state().github_mirror_base,
+                                             simulation.state().github_api_base});
             {
                 std::lock_guard lock(download_tuning_state.mutex);
                 download_tuning_state.download_server = simulation.state().download_server;

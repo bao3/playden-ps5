@@ -4221,7 +4221,7 @@ playden::Preferences Simulation::ExportPreferences() const {
             state_.web_access, state_.content_language, state_.hide_run_once_help, state_.hide_launcher_help,
             state_.runtime_prompt_kit, state_.proxy_mode, state_.proxy_host, state_.proxy_port,
             state_.proxy_username, state_.proxy_password, state_.proxy_global, state_.github_mirror,
-            state_.github_mirror_base};
+            state_.github_mirror_base, state_.github_api_base};
 }
 
 void Simulation::apply_organization_snapshot(const playden::OrganizationSnapshot& snapshot) {
@@ -4465,6 +4465,7 @@ bool Simulation::ApplyPreferences(PersistenceLoadToken token,
         state_.proxy_global = loaded.preferences.download_proxy_global;
         state_.github_mirror = loaded.preferences.github_mirror;
         state_.github_mirror_base = loaded.preferences.github_mirror_base;
+        state_.github_api_base = loaded.preferences.github_api_base;
         captured_preferences_ = loaded.preferences;
         preferences_saved_revision_ = preferences_revision_;
     }
@@ -4740,7 +4741,8 @@ bool Simulation::record_live_persistence() {
                                       after_preferences.download_proxy_password != captured_preferences_.download_proxy_password ||
                                       after_preferences.download_proxy_global != captured_preferences_.download_proxy_global ||
                                       after_preferences.github_mirror != captured_preferences_.github_mirror ||
-                                      after_preferences.github_mirror_base != captured_preferences_.github_mirror_base);
+                                      after_preferences.github_mirror_base != captured_preferences_.github_mirror_base ||
+                                      after_preferences.github_api_base != captured_preferences_.github_api_base);
 
     if (organization_changed && !snapshot_within_model_bounds(after_organization)) {
         apply_organization_snapshot(captured_organization_);
@@ -4780,6 +4782,7 @@ bool Simulation::record_live_persistence() {
                 state_.proxy_global = captured_preferences_.download_proxy_global;
                 state_.github_mirror = captured_preferences_.github_mirror;
                 state_.github_mirror_base = captured_preferences_.github_mirror_base;
+                state_.github_api_base = captured_preferences_.github_api_base;
                 organization_journal_full_ = true;
                 force_organization_reset_ = false;
                 force_organization_selection_ = false;
@@ -7766,11 +7769,14 @@ void Simulation::rebuild_view() {
             mirror.subtitle = mirror_paused
                 ? "Saved. Off while a downloads proxy is on. It comes back when Proxy is Off."
                 : state_.github_mirror
-                    ? "Release downloads use this mirror. GitHub's update check stays direct."
-                    : "Off: release downloads come from GitHub.";
+                    ? "Release downloads and the update check use this mirror. A matching checksum compares those two answers."
+                    : "Off: release downloads and the update check come from GitHub.";
             auto& mirror_base = add("settings-github-mirror-base", RowKind::Action, "Mirror address", "github-mirror-base");
             mirror_base.value = state_.github_mirror_base.empty() ? "Not set" : state_.github_mirror_base;
-            mirror_base.subtitle = "HTTPS address. Release downloads use /github.com/ in front of the GitHub path.";
+            mirror_base.subtitle = "HTTPS address. A release download is this address, then the full GitHub URL.";
+            auto& api_base = add("settings-github-api-base", RowKind::Action, "GitHub API address", "github-api-base");
+            api_base.value = state_.github_api_base.empty() ? "Not set" : state_.github_api_base;
+            api_base.subtitle = "Used for the update check. GitHub's own rate limit still applies.";
         }
         section = "Display";
         auto& motion = add("settings-motion", RowKind::Toggle, "Reduced motion", "toggle-motion");
@@ -8492,6 +8498,18 @@ void Simulation::commit_editor() {
         }
         state_.editor.active = false;
         state_.navigation.focus_key = "settings-github-mirror-base";
+        return;
+    }
+    if (state_.editor.purpose == "GitHub API address") {
+        const std::string value = trimmed(state_.editor.value);
+        if (!playden::update::ValidGithubApiBase(value))
+            ProxyNotice(state_, "Enter the mirror address followed by https://api.github.com.");
+        else {
+            state_.github_api_base = value;
+            save_profile();
+        }
+        state_.editor.active = false;
+        state_.navigation.focus_key = "settings-github-api-base";
         return;
     }
     if (state_.editor.purpose == "Search") { state_.library.query = state_.editor.value; reconcile_library_selection(state_); }
@@ -10652,14 +10670,16 @@ void Simulation::activate() {
         save_profile();
     }
     else if (action_name == "toggle-github-mirror") {
-        if (!state_.github_mirror && !playden::update::ValidGithubMirrorBase(state_.github_mirror_base))
-            ProxyNotice(state_, "Enter a mirror address before turning the GitHub mirror on.");
+        if (!state_.github_mirror && (!playden::update::ValidGithubMirrorBase(state_.github_mirror_base) ||
+                                      !playden::update::ValidGithubApiBase(state_.github_api_base)))
+            ProxyNotice(state_, "Enter a mirror address and a GitHub API address before turning the mirror on.");
         else {
             state_.github_mirror = !state_.github_mirror;
             save_profile();
         }
     }
     else if (action_name == "github-mirror-base") start_editor("Mirror address", state_.github_mirror_base);
+    else if (action_name == "github-api-base") start_editor("GitHub API address", state_.github_api_base);
     else if (action_name == "launch") { state_.session_game_id = state_.navigation.selected_game_id; state_.session = SessionState::Preparing; state_.navigation.route = Route::Session; state_.navigation.focus_key = "session-return"; }
     else if (action_name == "runtime-status") open_modal({"runtime", "Runtime unavailable", "details-play", {"runtime-retry", "cancel"}, 0, false});
     else if (action_name == "return-game") state_.session = SessionState::Running;

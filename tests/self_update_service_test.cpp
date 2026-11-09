@@ -72,8 +72,8 @@ struct Server {
   std::vector<std::string> urls;
 
   static std::string Canonical(std::string url) {
-    const std::string prefix = "https://gh.heibang.club/github.com/";
-    if (url.rfind(prefix, 0) == 0) return "https://github.com/" + url.substr(prefix.size());
+    const std::string prefix = "https://gh.heibang.club/";
+    if (url.rfind(prefix, 0) == 0 && url.compare(prefix.size(), 8, "https://") == 0) return url.substr(prefix.size());
     return url;
   }
 
@@ -1225,7 +1225,7 @@ int main() {
     const std::string newer = as_beta(fixture.server.latest);
     fixture.server.releases = "[" + newer + "," + current + "," + older + "]";
     fixture.server.latest_status = 404;
-    SetGithubMirror({true, "https://gh.heibang.club"});
+    SetGithubMirror({true, "https://gh.heibang.club", "https://gh.heibang.club/https://api.github.com"});
     auto config = fixture.Config(*ParseVersion("0.11.0-beta.9001"));
     config.include_betas = false;
     UpdateService service(config);
@@ -1239,12 +1239,13 @@ int main() {
     for (const auto& url : fixture.server.urls) {
       if (url.find("api.github.com/") != std::string::npos) {
         saw_api = true;
-        CHECK(url.find("gh.heibang.club") == std::string::npos);
+        CHECK(url.rfind("https://gh.heibang.club/https://api.github.com/", 0) == 0);
         CHECK(url.find("/releases/latest") == std::string::npos);
+        CHECK(url.find("?per_page=100") != std::string::npos);
       }
       if (url.find("playden-update.json") != std::string::npos) {
         saw_manifest = true;
-        CHECK(url.rfind("https://gh.heibang.club/github.com/", 0) == 0);
+        CHECK(url.rfind("https://gh.heibang.club/https://github.com/", 0) == 0);
         CHECK(url.find("0.11.0-beta.1") == std::string::npos);
       }
       CHECK(url.find("playden-ps5-0.11.0-beta.1.zip") == std::string::npos);
@@ -1273,7 +1274,13 @@ int main() {
       CHECK(url.rfind("https://github.com/", 0) == 0);
       CHECK(url.find("gh.heibang.club") == std::string::npos);
     }
-    CHECK(saw_github);
+    bool saw_direct_api = false;
+    for (const auto& url : fixture.server.urls) {
+      if (url.find("api.github.com/") == std::string::npos) continue;
+      saw_direct_api = true;
+      CHECK(url.rfind("https://api.github.com/", 0) == 0);
+    }
+    CHECK(saw_github && saw_direct_api);
     playden::steam::SetNetworkProxy({});
     fixture.server.urls.clear();
     fixture.server.kit_downloads = 0;
@@ -1284,7 +1291,7 @@ int main() {
     for (const auto& url : fixture.server.urls)
       if (url.find("playden-ps5-0.11.0-beta.9002.zip") != std::string::npos) {
         saw_app = true;
-        CHECK(url.rfind("https://gh.heibang.club/github.com/", 0) == 0);
+        CHECK(url.rfind("https://gh.heibang.club/https://github.com/", 0) == 0);
       }
     CHECK(saw_app);
     SetGithubMirror({});

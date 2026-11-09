@@ -152,24 +152,67 @@ bool HeaderNameIs(std::string_view name, std::string_view expected) {
   return true;
 }
 
+struct ApiBase {
+  bool ok = false;
+  std::string normalized;
+  std::string origin;
+};
+
+ApiBase ParseApiBase(std::string_view base) {
+  ApiBase parsed;
+  if (!base.empty() && base.back() == '/') base.remove_suffix(1);
+  const std::string marker = "/https://api.github.com";
+  if (base.size() <= marker.size() || base.compare(base.size() - marker.size(), marker.size(), marker) != 0) return parsed;
+  const Origin origin = ParseBase(base.substr(0, base.size() - marker.size()));
+  if (!origin.ok) return parsed;
+  parsed.ok = true;
+  parsed.origin = origin.origin;
+  parsed.normalized = origin.origin + marker;
+  return parsed;
+}
+
+bool GithubApiUrl(std::string_view url) {
+  const std::string prefix = "https://api.github.com/";
+  if (url.size() <= prefix.size() || url.compare(0, prefix.size(), prefix) != 0) return false;
+  return url.find_first_of("\\# ") == std::string_view::npos;
+}
+
 }  // namespace
 
 bool ValidGithubMirrorBase(std::string_view base) { return ParseBase(base).ok; }
+
+bool ValidGithubApiBase(std::string_view base) { return ParseApiBase(base).ok; }
 
 MirrorDecision DecideGithubMirror(std::string_view url, const GithubMirrorSettings& mirror, bool downloads_proxy_on) {
   MirrorDecision decision;
   decision.url = std::string(url);
   std::string path;
-  if (!ReleasePath(url, &path)) return decision;
+  const bool release = ReleasePath(url, &path);
+  const bool api = GithubApiUrl(url);
+  if (!release && !api) return decision;
   if (!mirror.enabled || downloads_proxy_on) return decision;
-  const Origin origin = ParseBase(mirror.base);
-  if (!origin.ok) {
+  if (release) {
+    const Origin origin = ParseBase(mirror.base);
+    if (!origin.ok) {
+      decision.action = MirrorAction::kReject;
+      decision.url.clear();
+      return decision;
+    }
+    decision.action = MirrorAction::kRewrite;
+    decision.origin = origin.origin;
+    decision.url = origin.origin + "/" + std::string(url);
+    return decision;
+  }
+  const ApiBase api_base = ParseApiBase(mirror.api_base);
+  if (!api_base.ok) {
     decision.action = MirrorAction::kReject;
     decision.url.clear();
     return decision;
   }
+  const std::string root = "https://api.github.com";
   decision.action = MirrorAction::kRewrite;
-  decision.url = origin.origin + "/github.com/" + path;
+  decision.origin = api_base.origin;
+  decision.url = api_base.normalized + std::string(url.substr(root.size()));
   return decision;
 }
 
