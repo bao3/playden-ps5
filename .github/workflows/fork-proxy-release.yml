@@ -11,7 +11,8 @@ permissions:
 
 jobs:
   host-tests:
-    runs-on: macos-latest
+    # macos-latest is arm64 and this repository could not acquire one. macos-13 is the Intel pool.
+    runs-on: macos-13
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +83,7 @@ jobs:
             --kit-revision 0.20 \
             --min-from 0.6.0 \
             --tag v0.11.0-beta.9002 \
-            --notes "Fork build 0.11.0-beta.9002 checks bao3/playden-ps5 for updates, including a newer beta, through the GitHub mirror when Proxy is Off. Release files use https://gh.heibang.club/ plus the full GitHub URL. The update check uses https://gh.heibang.club/https://api.github.com. An HTTP or SOCKS5 proxy pauses both. A matching checksum compares the file with the details from that same mirror. It is not an official Playden release. The runtime kit is 0.20, unchanged." \
+            --notes "Fork build 0.11.0-beta.9002 checks bao3/playden-ps5, including newer betas, through the GitHub mirror while Proxy is Off. Files use https://gh.heibang.club/ plus the full GitHub URL. The update check uses https://gh.heibang.club/https://api.github.com. An HTTP or SOCKS5 proxy pauses both. A matching checksum only compares those two mirror answers. Not an official release. Kit 0.20 is unchanged." \
             --out playden-update.json
           sha256sum playden-ps5-0.11.0-beta.9002.zip playden-kit-0.20.zip playden-update.json > SHA256SUMS
           unzip -l playden-ps5-0.11.0-beta.9002.zip > zip-listing.txt
