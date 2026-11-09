@@ -86,7 +86,8 @@ def origin(conn, log):
         conn.sendall(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/nowhere\r\nContent-Length: 0\r\n\r\n")
         return
     body = b"fixture-ok"
-    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\n" + body)
+    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode("ascii") +
+                 b"\r\nConnection: close\r\n\r\n" + body)
 
 
 def serve_tls(sock, context, log):

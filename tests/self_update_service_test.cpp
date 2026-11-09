@@ -1288,7 +1288,13 @@ int main() {
     fixture.server.kit_downloads = 0;
     service.Install();
     Wait(service);
-    CHECK(service.Snapshot().phase == UpdatePhase::kStaged && fixture.server.kit_downloads == 0);
+    if (service.Snapshot().phase != UpdatePhase::kStaged || fixture.server.kit_downloads != 0) {
+      std::fprintf(stderr, "install phase=%d error=%s kit_downloads=%d\n",
+                   static_cast<int>(service.Snapshot().phase), service.Snapshot().error.c_str(),
+                   fixture.server.kit_downloads);
+    }
+    CHECK(service.Snapshot().phase == UpdatePhase::kStaged);
+    CHECK(fixture.server.kit_downloads == 0);
     bool saw_app = false;
     for (const auto& url : fixture.server.urls)
       if (url.find("playden-ps5-0.11.0-beta.9002.zip") != std::string::npos) {
