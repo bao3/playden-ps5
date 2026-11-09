@@ -53,7 +53,7 @@ jobs:
           "$bindir/clang" --version
       - name: Build the PS5 package
         env:
-          PLAYDEN_PRERELEASE: beta.9002
+          PLAYDEN_PRERELEASE: beta.9003
           PLAYDEN_ACCEPT_PS5_CURL_REBUILD: "1"
         run: |
           set -euo pipefail
@@ -67,7 +67,7 @@ jobs:
           }
           scripts/build-homebrew-ps5.sh
           version=$(tr -d '[:space:]' < build/homebrew-ps5/dist/FAKE77031/playden-version)
-          test "$version" = "0.11.0-beta.9002"
+          test "$version" = "0.11.0-beta.9003"
           scripts/package-release-zip.sh
       - name: Assemble the release files
         run: |
@@ -79,20 +79,20 @@ jobs:
             https://github.com/leolobato/playden-ps5/releases/download/v0.11.0-beta.1/playden-kit-0.20.zip
           echo "959acf877a82b2711454fd62ba4a9a7c0476ee24627e92511283aeb54ace5a46  playden-kit-0.20.zip" | sha256sum -c
           python3 "$GITHUB_WORKSPACE/tools/write_update_manifest.py" \
-            --app-zip playden-ps5-0.11.0-beta.9002.zip \
+            --app-zip playden-ps5-0.11.0-beta.9003.zip \
             --kit-zip playden-kit-0.20.zip \
             --kit-revision 0.20 \
             --min-from 0.6.0 \
-            --tag v0.11.0-beta.9002 \
-            --notes "Fork build 0.11.0-beta.9002 checks bao3/playden-ps5, including newer betas, through the GitHub mirror while Proxy is Off. Files use https://gh.heibang.club/ plus the full GitHub URL. The update check uses https://gh.heibang.club/https://api.github.com. An HTTP or SOCKS5 proxy pauses both. A matching checksum only compares those two mirror answers. Not an official release. Kit 0.20 is unchanged." \
+            --tag v0.11.0-beta.9003 \
+            --notes "Fork build 0.11.0-beta.9003 checks bao3/playden-ps5, including newer betas, through the GitHub mirror while Proxy is Off. Files use https://gh.heibang.club/ plus the full GitHub URL. The update check uses https://gh.heibang.club/https://api.github.com. An HTTP or SOCKS5 proxy pauses both. A matching checksum only compares those two mirror answers. Not an official release. Kit 0.20 is unchanged." \
             --out playden-update.json
-          sha256sum playden-ps5-0.11.0-beta.9002.zip playden-kit-0.20.zip playden-update.json > SHA256SUMS
-          unzip -l playden-ps5-0.11.0-beta.9002.zip > zip-listing.txt
+          sha256sum playden-ps5-0.11.0-beta.9003.zip playden-kit-0.20.zip playden-update.json > SHA256SUMS
+          unzip -l playden-ps5-0.11.0-beta.9003.zip > zip-listing.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: playden-ps5-0.11.0-beta.9002
+          name: playden-ps5-0.11.0-beta.9003
           path: |
-            build/release/playden-ps5-0.11.0-beta.9002.zip
+            build/release/playden-ps5-0.11.0-beta.9003.zip
             build/release/playden-kit-0.20.zip
             build/release/playden-update.json
             build/release/SHA256SUMS
@@ -107,7 +107,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: playden-ps5-0.11.0-beta.9002
+          name: playden-ps5-0.11.0-beta.9003
           path: release
       - name: Publish the fork pre-release once
         env:
@@ -119,15 +119,18 @@ jobs:
           if gh release view v0.11.0-beta.9001 --json tagName >/dev/null 2>&1; then
             echo "leaving v0.11.0-beta.9001 unchanged"
           fi
-          if gh release view v0.11.0-beta.9002 >/dev/null 2>&1; then
-            echo "v0.11.0-beta.9002 already exists; leaving its assets unchanged"
-            gh release view v0.11.0-beta.9002 --json url,assets
+          if gh release view v0.11.0-beta.9002 --json tagName >/dev/null 2>&1; then
+            echo "leaving v0.11.0-beta.9002 unchanged"
+          fi
+          if gh release view v0.11.0-beta.9003 >/dev/null 2>&1; then
+            echo "v0.11.0-beta.9003 already exists; leaving its assets unchanged"
+            gh release view v0.11.0-beta.9003 --json url,assets
             exit 0
           fi
-          gh release create v0.11.0-beta.9002 \
+          gh release create v0.11.0-beta.9003 \
             --prerelease \
             --target "${{ github.sha }}" \
-            --title "Playden for PS5 0.11.0-beta.9002 (fork mirror)" \
+            --title "Playden for PS5 0.11.0-beta.9003 (fork mirror)" \
             --notes "$(cat <<'EOF'
           Fork build of bao3/playden-ps5. This is not an official Playden release and it is not marked latest. v0.11.0-beta.9001 is unchanged.
 
@@ -135,10 +138,10 @@ jobs:
 
           Playden updates checks bao3/playden-ps5, including a newer beta of this build. It does not switch back to the upstream repository. The runtime kit file is the existing 0.20 zip, verified by SHA-256, not a new kit.
 
-          Install by copying FAKE77031 from playden-ps5-0.11.0-beta.9002.zip to /data/homebrew/FAKE77031. This build was not run on a console.
+          Install by copying FAKE77031 from playden-ps5-0.11.0-beta.9003.zip to /data/homebrew/FAKE77031. Quit Playden first. This build was not run on a console. The deploy tool is tools/console_title_deploy.py inside the zip. It only replaces /data/homebrew/FAKE77031 and keeps /data/playden user data, games and kits.
           EOF
           )" \
-            playden-ps5-0.11.0-beta.9002.zip \
+            playden-ps5-0.11.0-beta.9003.zip \
             playden-kit-0.20.zip \
             playden-update.json \
             SHA256SUMS
