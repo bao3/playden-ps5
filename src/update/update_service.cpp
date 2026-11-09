@@ -603,8 +603,10 @@ void UpdateService::Check(bool user_asked) {
 
 void UpdateService::Install() {
   Run([this] {
-    // A track change can arrive while a download is being cancelled or a check is queued.
-    if (release_ && (release_->prerelease || release_->version.beta) && !include_betas_.load()) {
+    // A stable build that opted out of betas must not install one already selected. A beta build
+    // stays on that channel with Beta updates off, the same rule DoCheck uses to find the release.
+    if (release_ && (release_->prerelease || release_->version.beta) && !include_betas_.load() &&
+        config_.current.beta == 0) {
       DoCheck(false);
       return;
     }

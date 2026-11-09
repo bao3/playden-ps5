@@ -1288,11 +1288,6 @@ int main() {
     fixture.server.kit_downloads = 0;
     service.Install();
     Wait(service);
-    if (service.Snapshot().phase != UpdatePhase::kStaged || fixture.server.kit_downloads != 0) {
-      std::fprintf(stderr, "install phase=%d error=%s kit_downloads=%d\n",
-                   static_cast<int>(service.Snapshot().phase), service.Snapshot().error.c_str(),
-                   fixture.server.kit_downloads);
-    }
     CHECK(service.Snapshot().phase == UpdatePhase::kStaged);
     CHECK(fixture.server.kit_downloads == 0);
     bool saw_app = false;
@@ -1325,11 +1320,11 @@ int main() {
         R"(","draft":false,"prerelease":true,"assets":[)" +
         file_asset("playden-update.json", manifest, page + "playden-update.json") + "," +
         file_asset("playden-ps5-0.11.0-beta.9002.zip", app, page + "playden-ps5-0.11.0-beta.9002.zip") + "," +
-        file_asset("playden-kit-0.20.zip", kit, page + "playden-kit-0.20.zip") + "]}";
+        file_asset("playden-kit-0.20.zip", kit, page + "playden-kit-0.20.zip") + "]}]";
     const std::string stolen = std::string(R"([{"tag_name":")") + tag +
         R"(","draft":false,"prerelease":true,"assets":[)" +
         file_asset("playden-update.json", manifest, page + "playden-update.json") + "," +
-        file_asset("playden-kit-0.20.zip", kit, upstream) + "]}";
+        file_asset("playden-kit-0.20.zip", kit, upstream) + "]}]";
     std::map<std::string, std::string> files = {{page + "playden-update.json", manifest},
                                                 {page + "playden-ps5-0.11.0-beta.9002.zip", app},
                                                 {page + "playden-kit-0.20.zip", kit}};
