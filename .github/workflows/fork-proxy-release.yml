@@ -73,6 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           cd build/release
+          # Build-time copy of the pinned kit. The running app downloads this file from bao3/playden-ps5.
           curl --fail --location --retry 3 \
             -o playden-kit-0.20.zip \
             https://github.com/leolobato/playden-ps5/releases/download/v0.11.0-beta.1/playden-kit-0.20.zip

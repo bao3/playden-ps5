@@ -50,6 +50,23 @@ std::optional<std::string> HashBytes(const UpdateConfig& config, std::string_vie
   return result;
 }
 
+std::optional<std::string> OwnReleasePrefix(const std::string& latest_release_url) {
+  constexpr std::string_view marker = "https://api.github.com/repos/";
+  if (latest_release_url.compare(0, marker.size(), marker) != 0) return std::nullopt;
+  const std::string rest = latest_release_url.substr(marker.size());
+  const auto slash = rest.find('/');
+  const auto slash2 = slash == std::string::npos ? std::string::npos : rest.find('/', slash + 1);
+  if (slash == std::string::npos || slash == 0 || slash2 == std::string::npos || slash2 == slash + 1) return std::nullopt;
+  const std::string owner = rest.substr(0, slash);
+  const std::string repo = rest.substr(slash + 1, slash2 - slash - 1);
+  if (owner.find('.') != std::string::npos || repo.find('.') != std::string::npos) return std::nullopt;
+  return "https://github.com/" + owner + "/" + repo + "/releases/download/";
+}
+
+bool OwnDownload(const std::string& url, const std::string& prefix) {
+  return url.rfind(prefix, 0) == 0 && url.find("..") == std::string::npos;
+}
+
 const char* GithubFetchMessage(const std::string& error, const char* fallback) {
   if (error.find("GitHub rate limit") != std::string::npos)
     return "GitHub's rate limit stopped the update check. Try again later.";
@@ -650,6 +667,10 @@ void UpdateService::DoCheck(bool user_asked) {
   }
   const auto* asset = release->Find(kUpdateManifestAsset);
   if (!asset) return Fail("Release " + release->tag + " has no update information. Install it by hand.", "no asset");
+  const auto origin = OwnReleasePrefix(config_.latest_release_url);
+  if (!origin) return Fail("Playden's update source is not set.", "release url");
+  if (!local && !OwnDownload(asset->url, *origin))
+    return Fail("This update is not published with this Playden.", "download url");
   const auto manifest_text = local ? read_local(kUpdateManifestAsset)
                                    : FetchSmall(asset->url, 256 << 10, options, "application/octet-stream", &error, true);
   if (manifest_text && !local && IsSha256(asset->sha256) && !DigestMatches(config_, *manifest_text, asset->sha256))
@@ -684,6 +705,8 @@ void UpdateService::DoCheck(bool user_asked) {
   if (!app || (kit_needed && !kit)) return Fail("Release " + release->tag + " is missing a download.", "asset");
   if (app->sha256.empty() || (kit_needed && kit->sha256.empty()))
     return Fail("Release " + release->tag + " has no checksums. Install it by hand.", "digest");
+  if (!local && (!OwnDownload(app->url, *origin) || (kit_needed && !OwnDownload(kit->url, *origin))))
+    return Fail("This update is not published with this Playden.", "download url");
   release_ = *release;
   manifest_ = *manifest;
   if (kit_needed) kit_zip_ = *kit;
@@ -957,6 +980,9 @@ void UpdateService::DoCheckKit() {
     if ((zip = release.Find(manifest->kit.asset))) source = &release;
   }
   if (!zip) return unavailable("no release has " + manifest->kit.asset);
+  const auto origin = OwnReleasePrefix(config_.latest_release_url);
+  if (!origin || !OwnDownload(zip->url, *origin))
+    return FailKit("This runtime kit is not published with this Playden.", "download url");
   if (zip->sha256.empty()) return FailKit("The runtime kit on GitHub has no checksum. Install it by hand.", source->tag);
   const bool staged = !ReadyKit(manifest->kit).empty();
   kit_asset_ = *zip;

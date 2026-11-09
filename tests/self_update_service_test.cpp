@@ -1297,6 +1297,146 @@ int main() {
     SetGithubMirror({});
     RemoveTree(fixture.root);
   }
+  // A fresh install downloads its runtime kit, and an update downloads the app, from this fork through the mirror.
+  {
+    Fixture fixture;
+    fixture.root = zip_fixture::TempFolder("fork-origin");
+    const std::string tag = "v0.11.0-beta.9002";
+    const std::string page = "https://github.com/bao3/playden-ps5/releases/download/" + tag + "/";
+    const std::string upstream = "https://github.com/leolobato/playden-ps5/releases/download/v0.11.0-beta.1/playden-kit-0.20.zip";
+    const std::string app = AppZip("0.11.0-beta.9002", "00.011.000", "0.11.0-beta.9002\n");
+    const std::string kit = KitZip();
+    const std::string manifest =
+        std::string(R"({"format":1,"app":{"version":"0.11.0-beta.9002","title_id":"FAKE77031","min_from":"0.6.0","asset":"playden-ps5-0.11.0-beta.9002.zip","prefix":"FAKE77031/"},"kit":{"kit_id":"kitid","revision":"0.20","manifest_sha256":")") +
+        kKitSha + R"(","asset":"playden-kit-0.20.zip","prefix":"playden-kit-h-r9/kitid/"},"notes":"Fork kit."})";
+    auto file_asset = [&](const std::string& name, const std::string& body, const std::string& url) {
+      return std::string(R"({"name":")") + name + R"(","size":)" + std::to_string(body.size()) +
+             R"(,"digest":"sha256:)" + FakeSha(body) + R"(","browser_download_url":")" + url + R"("})";
+    };
+    const std::string good = std::string(R"([{"tag_name":")") + tag +
+        R"(","draft":false,"prerelease":true,"assets":[)" +
+        file_asset("playden-update.json", manifest, page + "playden-update.json") + "," +
+        file_asset("playden-ps5-0.11.0-beta.9002.zip", app, page + "playden-ps5-0.11.0-beta.9002.zip") + "," +
+        file_asset("playden-kit-0.20.zip", kit, page + "playden-kit-0.20.zip") + "]}";
+    const std::string stolen = std::string(R"([{"tag_name":")") + tag +
+        R"(","draft":false,"prerelease":true,"assets":[)" +
+        file_asset("playden-update.json", manifest, page + "playden-update.json") + "," +
+        file_asset("playden-kit-0.20.zip", kit, upstream) + "]}";
+    std::map<std::string, std::string> files = {{page + "playden-update.json", manifest},
+                                                {page + "playden-ps5-0.11.0-beta.9002.zip", app},
+                                                {page + "playden-kit-0.20.zip", kit}};
+    std::string releases_body = good;
+    std::vector<std::string> urls;
+    auto canonical = [](std::string url) {
+      const std::string prefix = "https://gh.heibang.club/";
+      if (url.rfind(prefix, 0) == 0 && url.compare(prefix.size(), 8, "https://") == 0) return url.substr(prefix.size());
+      return url;
+    };
+    auto config = fixture.Config(*ParseVersion("0.11.0-beta.9002"));
+    config.latest_release_url = kUpdateLatestReleaseUrl;
+    config.releases_page = kUpdateReleasesPage;
+    config.kit_id = "kitid";
+    config.kit_manifest_sha256 = kKitSha;
+    config.fetch = [&](const HttpRequest& request, const std::atomic<bool>&) {
+      urls.push_back(request.url);
+      const std::string url = canonical(request.url);
+      HttpResponse response;
+      if (url.find("https://api.github.com/repos/bao3/playden-ps5/releases") == 0) {
+        response.status_code = 200;
+        response.headers.push_back({"Content-Type", "application/json"});
+        response.body.assign(releases_body.begin(), releases_body.end());
+        return response;
+      }
+      const auto found = files.find(url);
+      if (found == files.end()) {
+        response.status_code = 404;
+        return response;
+      }
+      std::string range;
+      for (const auto& header : request.headers)
+        if (header.first == "Range") range = header.second;
+      const std::string& body = found->second;
+      if (range.rfind("bytes=", 0) != 0) {
+        response.status_code = 200;
+        response.body.assign(body.begin(), body.end());
+        return response;
+      }
+      const auto dash = range.find('-');
+      const std::size_t from = std::stoull(range.substr(6, dash - 6));
+      const std::size_t to = std::min<std::size_t>(std::stoull(range.substr(dash + 1)), body.size() - 1);
+      response.status_code = 206;
+      response.body.assign(body.begin() + static_cast<std::ptrdiff_t>(from), body.begin() + static_cast<std::ptrdiff_t>(to + 1));
+      response.headers.push_back({"Content-Range", "bytes " + std::to_string(from) + "-" + std::to_string(to) + "/" +
+                                                       std::to_string(body.size())});
+      return response;
+    };
+    SetGithubMirror({true, std::string(kDefaultGithubMirrorBase), std::string(kDefaultGithubApiBase)});
+    UpdateService fresh(config);
+    fresh.CheckKit();
+    Wait(fresh);
+    CHECK(fresh.Snapshot().kit.phase == KitInstallPhase::kAvailable);
+    fresh.InstallKit();
+    Wait(fresh);
+    CHECK(fresh.Snapshot().kit.phase == KitInstallPhase::kInstalled);
+    bool saw_api = false, saw_kit = false, saw_upstream = false;
+    for (const auto& url : urls) {
+      if (url.find("leolobato") != std::string::npos) saw_upstream = true;
+      if (url.rfind("https://gh.heibang.club/https://api.github.com/repos/bao3/playden-ps5/releases", 0) == 0) saw_api = true;
+      if (url.rfind("https://gh.heibang.club/https://github.com/bao3/playden-ps5/releases/download/" + tag + "/playden-kit-0.20.zip", 0) == 0)
+        saw_kit = true;
+    }
+    CHECK(saw_api && saw_kit && !saw_upstream);
+    // An older install is offered the fork's app through the same mirror, not the upstream repository.
+    urls.clear();
+    auto older = fixture.Config(*ParseVersion("0.11.0-beta.9001"));
+    older.latest_release_url = kUpdateLatestReleaseUrl;
+    older.releases_page = kUpdateReleasesPage;
+    older.kit_id = "kitid";
+    older.kit_manifest_sha256 = kKitSha;
+    older.fetch = config.fetch;
+    older.hash_bytes = config.hash_bytes;
+    older.hash_file = config.hash_file;
+    older.verify_kit = config.verify_kit;
+    older.installed_root = config.installed_root;
+    older.work_root = config.work_root;
+    older.kits_root = config.kits_root;
+    older.appmeta_root = config.appmeta_root;
+    older.registered_app_root = config.registered_app_root;
+    older.free_bytes = config.free_bytes;
+    older.wait_before_retry = config.wait_before_retry;
+    older.now = config.now;
+    Put(fixture.root + "/homebrew/FAKE77031/eboot.bin", "old");
+    UpdateService update(older);
+    update.Check(true);
+    Wait(update);
+    CHECK(update.Snapshot().phase == UpdatePhase::kAvailable);
+    CHECK(update.Snapshot().available.ToString() == "0.11.0-beta.9002");
+    update.Install();
+    Wait(update);
+    bool saw_app = false;
+    for (const auto& url : urls) {
+      CHECK(url.find("leolobato") == std::string::npos);
+      if (url.find("playden-ps5-0.11.0-beta.9002.zip") != std::string::npos) {
+        saw_app = true;
+        CHECK(url.rfind("https://gh.heibang.club/https://github.com/bao3/playden-ps5/releases/download/", 0) == 0);
+      }
+    }
+    CHECK(saw_app && update.Snapshot().phase == UpdatePhase::kStaged);
+    // A release that names the upstream kit is refused before that host is requested.
+    urls.clear();
+    releases_body = stolen;
+    auto refused_config = config;
+    refused_config.kits_root = fixture.root + "/playden/kits-empty";
+    refused_config.work_root = fixture.root + "/playden/self-update-refused";
+    UpdateService refused(refused_config);
+    refused.CheckKit();
+    Wait(refused);
+    CHECK(refused.Snapshot().kit.phase == KitInstallPhase::kFailed);
+    for (const auto& url : urls) CHECK(url.find("leolobato") == std::string::npos);
+    SetGithubMirror({});
+    playden::steam::SetNetworkProxy({});
+    RemoveTree(fixture.root);
+  }
   std::puts("ok");
   return 0;
 }

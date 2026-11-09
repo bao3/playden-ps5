@@ -211,7 +211,8 @@ folders' modes right if they changed.
 
 The runtime kit is what runs Windows games: Wine, Mesa and DXVK. Playden
 downloads the kit its version was made for from this repository's releases, on its first start and whenever the
-installed kit isn't that one. It installs in the background, shows on the Queue screen, and games can be prepared
+installed kit isn't that one. It does not download that kit from another repository. The file published here is the
+pinned runtime kit, checked by SHA-256 before it is attached to the release. It installs in the background, shows on the Queue screen, and games can be prepared
 as soon as it is in place. If you choose Later, or the download fails, Settings › About › Runtime kit starts
 it again.
 
