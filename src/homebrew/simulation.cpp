@@ -16,7 +16,6 @@
 #include "stores/local/scanner.h"
 #include "steam/backend/json.h"
 #include "steam/secret.h"
-#include "steam/backend/network_proxy.h"
 
 #include <cstring>
 #include <algorithm>
@@ -8358,9 +8357,39 @@ void Simulation::submit_fixture_sign_in() {
 }
 
 namespace {
+bool ProxyHostOk(const std::string& host) {
+    if (host.empty() || host.size() > 253 || host.front() == '.' || host.back() == '.') return false;
+    std::size_t label = 0;
+    for (const unsigned char c : host) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.';
+        if (!ok) return false;
+        if (c == '.') {
+            if (label == 0) return false;
+            label = 0;
+        } else if (++label > 63) return false;
+    }
+    return label > 0;
+}
+
+bool ProxyPortOk(const std::string& port) {
+    if (port.empty() || port.size() > 5) return false;
+    int value = 0;
+    for (const char c : port) {
+        if (c < '0' || c > '9') return false;
+        value = value * 10 + (c - '0');
+    }
+    return value >= 1 && value <= 65535;
+}
+
+bool ProxyTextOk(const std::string& text, std::size_t limit) {
+    if (text.size() > limit) return false;
+    for (const unsigned char c : text)
+        if (c < 0x20 || c == 0x7f) return false;
+    return true;
+}
+
 bool ProxyEndpointOk(const std::string& host, const std::string& port) {
-    const auto proxy = steam::MakeNetworkProxy("http", host, port, "", "", false);
-    return !proxy.host.empty() && proxy.port >= 1 && proxy.port <= 65535;
+    return ProxyHostOk(host) && ProxyPortOk(port);
 }
 
 void ProxyNotice(State& state, const std::string& message) {
@@ -8408,16 +8437,14 @@ void Simulation::commit_editor() {
                 message = "Enter a port from 1 to 65535.";
             else state_.proxy_port = value;
         } else if (state_.editor.purpose == "Proxy username") {
-            const auto checked = steam::MakeNetworkProxy("off", "proxy.invalid", "1", value, "", false);
-            if (checked.username != value) message = "That proxy username isn't valid.";
+            if (!ProxyTextOk(value, 128)) message = "That proxy username isn't valid.";
             else {
                 state_.proxy_username = value;
                 if (value.empty()) steam::ZeroizeSecret(state_.proxy_password);
             }
         } else {
-            const auto checked = steam::MakeNetworkProxy("off", "proxy.invalid", "1", state_.proxy_username, value, false);
             if (!value.empty() && state_.proxy_username.empty()) message = "Enter a proxy username before a password.";
-            else if (checked.password != value) message = "That proxy password isn't valid.";
+            else if (!ProxyTextOk(value, 256)) message = "That proxy password isn't valid.";
             else {
                 steam::ZeroizeSecret(state_.proxy_password);
                 state_.proxy_password = value;

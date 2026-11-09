@@ -52,7 +52,11 @@ jobs:
         run: |
           set -euo pipefail
           scripts/fetch-deps.sh
-          scripts/build-lapy-helper.sh
+          scripts/build-lapy-helper.sh || {
+            echo "lapy helper failed"
+            find third_party/PS5-Lapy-JB-Daemon/build -type f \( -name '*.log' -o -name '*.txt' \) -print -exec cat {} \;
+            exit 1
+          }
           scripts/build-homebrew-ps5.sh
           version=$(tr -d '[:space:]' < build/homebrew-ps5/dist/FAKE77031/playden-version)
           test "$version" = "0.11.0-beta.9001"
