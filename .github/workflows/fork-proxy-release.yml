@@ -54,6 +54,8 @@ jobs:
           PLAYDEN_ACCEPT_PS5_CURL_REBUILD: "1"
         run: |
           set -euo pipefail
+          export PATH="$(llvm-config-18 --bindir):$PATH"
+          export HOST_CXX=clang++
           scripts/fetch-deps.sh
           scripts/build-lapy-helper.sh || {
             echo "lapy helper failed"
