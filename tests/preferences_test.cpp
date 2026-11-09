@@ -186,12 +186,13 @@ void SignInMethodPersistsAndVersionThreeOpensQr() {
   Check(store.Save(preferences).ok(), "sign-in method preference saves");
   const auto saved = storage.Read("preferences.conf");
   Check(saved.ok() && std::string(saved.value().begin(), saved.value().end()) ==
-                          "version=13\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=1\nsteam_sign_in_password=1\n"
+                          "version=14\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=1\nsteam_sign_in_password=1\n"
                           "downloads_slow_network=0\nsteam_stay_signed_in=1\nbeta_updates=0\ndownload_server=\nweb_access=1\n"
                           "content_language=english\nhide_run_once_help=0\nhide_launcher_help=0\nruntime_prompt_kit=\n"
                           "download_proxy_mode=off\ndownload_proxy_host=\ndownload_proxy_port=\n"
-                          "download_proxy_username=\ndownload_proxy_password=\ndownload_proxy_global=0\n",
-        "version 13 format includes the proxy, off by default");
+                          "download_proxy_username=\ndownload_proxy_password=\ndownload_proxy_global=0\n"
+                          "github_mirror=1\ngithub_mirror_base=https://gh.heibang.club\n",
+        "version 14 format includes the proxy and the GitHub mirror");
   const auto loaded = store.Load();
   Check(loaded.status == playden::PreferencesLoadStatus::kLoaded && loaded.preferences.steam_sign_in_password &&
             loaded.preferences.cloud_saves_auto,
@@ -581,6 +582,33 @@ void ProxyPreferencesRoundTripAndOldFilesStayOff() {
   text.replace(mode, std::string("download_proxy_mode=socks5").size(), "download_proxy_mode=bogus");
   Check(storage.WriteAtomic("preferences.conf", playden::Bytes(text.begin(), text.end())).ok(), "bad proxy mode is written");
   Check(store.Load().status == playden::PreferencesLoadStatus::kDefaultCorrupt, "an unknown proxy mode is corrupt");
+
+  const std::string version_13 =
+      "version=13\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=0\nsteam_sign_in_password=0\n"
+      "downloads_slow_network=1\nsteam_stay_signed_in=1\nbeta_updates=0\ndownload_server=\nweb_access=1\n"
+      "content_language=english\nhide_run_once_help=0\nhide_launcher_help=0\nruntime_prompt_kit=\n"
+      "download_proxy_mode=http\ndownload_proxy_host=203.0.113.8\ndownload_proxy_port=8080\n"
+      "download_proxy_username=proxyuser\ndownload_proxy_password=secret\ndownload_proxy_global=1\n";
+  Check(storage.WriteAtomic("preferences.conf", playden::Bytes(version_13.begin(), version_13.end())).ok(),
+        "version 13 fixture is written");
+  const auto migrated = store.Load();
+  Check(migrated.status == playden::PreferencesLoadStatus::kLoaded && !migrated.preferences.beta_updates &&
+            migrated.preferences.download_proxy_mode == "http" &&
+            migrated.preferences.download_proxy_host == "203.0.113.8" &&
+            migrated.preferences.download_proxy_port == "8080" &&
+            migrated.preferences.download_proxy_username == "proxyuser" &&
+            migrated.preferences.download_proxy_password == "secret" && migrated.preferences.download_proxy_global &&
+            migrated.preferences.github_mirror &&
+            migrated.preferences.github_mirror_base == "https://gh.heibang.club",
+        "a version 13 file keeps the proxy and beta choice and gains the mirror defaults");
+  playden::Preferences custom = migrated.preferences;
+  custom.github_mirror = false;
+  custom.github_mirror_base = "https://mirror.example";
+  Check(store.Save(custom).ok(), "mirror choice saves");
+  const auto kept = store.Load();
+  Check(!kept.preferences.github_mirror && kept.preferences.github_mirror_base == "https://mirror.example" &&
+            kept.preferences.download_proxy_mode == "http" && !kept.preferences.beta_updates,
+        "turning the mirror off keeps the proxy and does not opt into beta updates");
 }
 
 }  // namespace

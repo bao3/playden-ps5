@@ -1,10 +1,12 @@
 #include "update/update_service.h"
 
+#include <mbedtls/sha256.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <utility>
@@ -32,6 +34,26 @@ void* RunJob(void* opaque) {
   std::unique_ptr<std::function<void()>> work(static_cast<std::function<void()>*>(opaque));
   (*work)();
   return nullptr;
+}
+
+std::optional<std::string> HashBytes(const UpdateConfig& config, std::string_view bytes) {
+  if (config.hash_bytes) return config.hash_bytes(bytes);
+  std::array<unsigned char, 32> digest{};
+  if (mbedtls_sha256(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(), digest.data(), 0) != 0)
+    return std::nullopt;
+  constexpr char hex[] = "0123456789abcdef";
+  std::string result(64, '0');
+  for (std::size_t i = 0; i < digest.size(); ++i) {
+    result[2 * i] = hex[digest[i] >> 4];
+    result[2 * i + 1] = hex[digest[i] & 15];
+  }
+  return result;
+}
+
+bool DigestMatches(const UpdateConfig& config, std::string_view bytes, const std::string& expected) {
+  if (!IsSha256(expected)) return false;
+  const auto actual = HashBytes(config, bytes);
+  return actual && *actual == expected;
 }
 
 std::string Quote(const std::string& text) {
@@ -589,17 +611,19 @@ void UpdateService::DoCheck(bool user_asked) {
     return std::nullopt;
   };
   if (local) Log("reading the release from " + config_.local_release_dir);
-  const bool include_betas = include_betas_.load();
+  // A beta build stays on that channel: GitHub's /releases/latest omits prereleases, and this fork
+  // publishes those. The saved Beta updates switch is left as it is. A stable build still uses it.
+  const bool follow_prereleases = include_betas_.load() || config_.current.beta != 0;
   std::optional<Release> release;
   std::optional<std::vector<Release>> releases;  // every release, when read: betas, or a kit zip left out
-  if (include_betas) {
+  if (follow_prereleases) {
     releases = FetchReleases(&error);
     if (!releases) return Fail("Playden could not read the releases on GitHub.", error);
     for (const auto& candidate : *releases)
       if (!candidate.draft && (!release || release->version < candidate.version)) release = candidate;
   } else {
     const auto body = local ? read_local("release.json")
-                            : FetchSmall(config_.latest_release_url, 2 << 20, options, "application/vnd.github+json", &error);
+                            : FetchSmall(config_.latest_release_url, 2 << 20, options, "application/vnd.github+json", &error, false);
     if (!body) return Fail("Playden could not reach GitHub to look for updates.", error);
     release = ParseRelease(*body, &error);
     if (!release) return Fail("The latest release on GitHub could not be read.", error);
@@ -619,7 +643,9 @@ void UpdateService::DoCheck(bool user_asked) {
   const auto* asset = release->Find(kUpdateManifestAsset);
   if (!asset) return Fail("Release " + release->tag + " has no update information. Install it by hand.", "no asset");
   const auto manifest_text = local ? read_local(kUpdateManifestAsset)
-                                   : FetchSmall(asset->url, 256 << 10, options, "application/octet-stream", &error);
+                                   : FetchSmall(asset->url, 256 << 10, options, "application/octet-stream", &error, true);
+  if (manifest_text && !local && IsSha256(asset->sha256) && !DigestMatches(config_, *manifest_text, asset->sha256))
+    return Fail("The update information did not match its checksum.", "manifest digest");
   if (!manifest_text) return Fail("Playden could not read the update information.", error);
   const auto manifest = ParseUpdateManifest(*manifest_text, &error);
   if (!manifest) return Fail("The update information of " + release->tag + " is not valid.", error);
@@ -831,7 +857,7 @@ std::optional<std::vector<Release>> UpdateService::FetchReleases(std::string* er
   if (url.size() > 7 && url.compare(url.size() - 7, 7, "/latest") == 0) url.erase(url.size() - 7);
   auto options = Downloads("");
   options.max_attempts = 2;
-  const auto body = FetchSmall(url + "?per_page=100", 4 << 20, options, "application/vnd.github+json", error);
+  const auto body = FetchSmall(url + "?per_page=100", 4 << 20, options, "application/vnd.github+json", error, false);
   if (!body) return std::nullopt;
   return ParseReleases(*body, error);
 }
@@ -890,7 +916,9 @@ void UpdateService::DoCheckKit() {
   const bool local = !config_.local_release_dir.empty() && Exists(config_.local_release_dir + "/" + kUpdateManifestAsset);
   std::optional<std::string> manifest_text;
   if (!local) {
-    manifest_text = FetchSmall(manifest_asset->url, 256 << 10, options, "application/octet-stream", &error);
+    manifest_text = FetchSmall(manifest_asset->url, 256 << 10, options, "application/octet-stream", &error, true);
+    if (manifest_text && IsSha256(manifest_asset->sha256) && !DigestMatches(config_, *manifest_text, manifest_asset->sha256))
+      return FailKit("The runtime kit information did not match its checksum.", "manifest digest");
   } else if (std::string text; ReadSmallFile(config_.local_release_dir + "/" + kUpdateManifestAsset, &text, 256 << 10)) {
     manifest_text = std::move(text);
   } else {

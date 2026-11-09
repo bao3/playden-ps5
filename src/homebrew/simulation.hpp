@@ -871,6 +871,9 @@ struct State {
     std::string proxy_username;
     std::string proxy_password;
     bool proxy_global = false;
+    // GitHub release downloads. The address is kept when a downloads proxy turns the mirror off.
+    bool github_mirror = true;
+    std::string github_mirror_base = playden::update::kDefaultGithubMirrorBase;
     bool hide_run_once_help = false;  // "Don't show again" on Run launcher or setup's dialog
     std::string runtime_prompt_kit;  // the kit whose runtime kit prompt was answered (its manifest SHA-256)
     bool hide_launcher_help = false;  // ...and on the one for turning on Start through a launcher

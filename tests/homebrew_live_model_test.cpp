@@ -1090,8 +1090,8 @@ void live_self_update(const std::filesystem::path& base) {
     model.UpdateSelfUpdate(update);
     check(find_row(model, "settings-beta-wait") &&
           find_row(model, "settings-beta-wait")->subtitle ==
-              "Playden moves to the next stable version when it is out.",
-          "opting out on a beta explains waiting for stable");
+              "Newer test versions are still offered. Beta updates applies after a stable version.",
+          "opting out on a beta still offers newer test versions");
     // Settings › About names a nightly as such, with its build number and commit.
     update.current = "0.8.0-nightly.20261027.2";
     update.commit = "d94c0b384d";

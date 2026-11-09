@@ -1,6 +1,9 @@
 #include "update/file_ops.h"
+#include "update/github_mirror.h"
 #include "update/update_service.h"
 #include "zip_fixture.h"
+
+#include "steam/backend/network_proxy.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -64,6 +67,15 @@ struct Server {
   std::string releases;  // the list, newest first
   int kit_downloads = 0;
   int requests = 0;
+  int latest_status = 200;
+  bool api_used_download_proxy = false;
+  std::vector<std::string> urls;
+
+  static std::string Canonical(std::string url) {
+    const std::string prefix = "https://gh.heibang.club/github.com/";
+    if (url.rfind(prefix, 0) == 0) return "https://github.com/" + url.substr(prefix.size());
+    return url;
+  }
 
   HttpResponse operator()(const HttpRequest& request) {
     HttpResponse response;
@@ -71,13 +83,20 @@ struct Server {
     for (const auto& [key, value] : request.headers)
       if (key == "Range") range = value;
     ++requests;
-    if (request.url == kLatest || request.url == kReleases) {
-      const std::string& body = request.url == kLatest ? latest : releases;
+    urls.push_back(request.url);
+    const std::string url = Canonical(request.url);
+    if (url == kLatest || url == kReleases) {
+      if (request.download_proxy) api_used_download_proxy = true;
+      if (url == kLatest && latest_status != 200) {
+        response.status_code = latest_status;
+        return response;
+      }
+      const std::string& body = url == kLatest ? latest : releases;
       response.status_code = 200;
       response.body.assign(body.begin(), body.end());
       return response;
     }
-    const auto found = files.find(request.url);
+    const auto found = files.find(url);
     if (found == files.end()) {
       response.status_code = 404;
       return response;
@@ -88,7 +107,7 @@ struct Server {
       response.body.assign(body.begin(), body.end());
       return response;
     }
-    if (request.url.find("kit") != std::string::npos && range != "bytes=0-0") ++kit_downloads;
+    if (url.find("kit") != std::string::npos && range != "bytes=0-0") ++kit_downloads;
     const auto dash = range.find('-');
     const std::size_t from = std::stoull(range.substr(6, dash - 6));
     const std::size_t to = std::min<std::size_t>(std::stoull(range.substr(dash + 1)), body.size() - 1);
@@ -164,6 +183,7 @@ struct Fixture {
       if (!ReadSmallFile(path, &text, 64 << 20)) return std::nullopt;
       return FakeSha(text);
     };
+    config.hash_bytes = [](std::string_view bytes) { return FakeSha(std::string(bytes)); };
     config.verify_kit = [](const std::string& kit_root) -> std::optional<std::string> {
       std::string sha;
       if (!ReadSmallFile(kit_root + "/manifest.json", &sha) || !Exists(kit_root + "/runtime/wine.bin")) return std::nullopt;
@@ -1183,6 +1203,91 @@ int main() {
     service.Check(true);
     Wait(service);
     CHECK(service.Snapshot().phase == UpdatePhase::kFailed);
+    RemoveTree(fixture.root);
+  }
+  // A beta of this fork sees a newer beta with Beta updates left off. Release files use the mirror.
+  // The API stays on api.github.com. An older release is not downloaded. An installed kit is reused.
+  {
+    Fixture fixture;
+    fixture.root = zip_fixture::TempFolder("fork-prerelease");
+    Installed(fixture.root);
+    Put(fixture.root + "/playden/kits/kitid/manifest.json", kKitSha);
+    Put(fixture.root + "/playden/kits/kitid/runtime/wine.bin", "w");
+    const auto as_beta = [](std::string json) {
+      json.replace(json.find("\"prerelease\":false"), 18, "\"prerelease\":true");
+      return json;
+    };
+    Publish(fixture.server, "v0.11.0-beta.1", "0.6.0", "00.011.000");
+    const std::string older = as_beta(fixture.server.latest);
+    Publish(fixture.server, "v0.11.0-beta.9001", "0.6.0", "00.011.000");
+    const std::string current = as_beta(fixture.server.latest);
+    Publish(fixture.server, "v0.11.0-beta.9002", "0.6.0", "00.011.000");
+    const std::string newer = as_beta(fixture.server.latest);
+    fixture.server.releases = "[" + newer + "," + current + "," + older + "]";
+    fixture.server.latest_status = 404;
+    SetGithubMirror({true, "https://gh.heibang.club"});
+    auto config = fixture.Config(*ParseVersion("0.11.0-beta.9001"));
+    config.include_betas = false;
+    UpdateService service(config);
+    service.Check(true);
+    Wait(service);
+    CHECK(service.Snapshot().phase == UpdatePhase::kAvailable);
+    CHECK(service.Snapshot().available.ToString() == "0.11.0-beta.9002");
+    CHECK(!service.Snapshot().kit_needed);
+    bool saw_api = false;
+    bool saw_manifest = false;
+    for (const auto& url : fixture.server.urls) {
+      if (url.find("api.github.com/") != std::string::npos) {
+        saw_api = true;
+        CHECK(url.find("gh.heibang.club") == std::string::npos);
+        CHECK(url.find("/releases/latest") == std::string::npos);
+      }
+      if (url.find("playden-update.json") != std::string::npos) {
+        saw_manifest = true;
+        CHECK(url.rfind("https://gh.heibang.club/github.com/", 0) == 0);
+        CHECK(url.find("0.11.0-beta.1") == std::string::npos);
+      }
+      CHECK(url.find("playden-ps5-0.11.0-beta.1.zip") == std::string::npos);
+    }
+    CHECK(saw_api && saw_manifest && !fixture.server.api_used_download_proxy);
+    // The manifest's API digest is the checksum. A mirror that changes the bytes is refused.
+    fixture.server.files[kDownload + "playden-update.json"][20] = 'X';
+    service.Check(true);
+    Wait(service);
+    CHECK(service.Snapshot().phase == UpdatePhase::kFailed);
+    CHECK(service.Snapshot().error.find("checksum") != std::string::npos);
+    Publish(fixture.server, "v0.11.0-beta.9002", "0.6.0", "00.011.000");
+    fixture.server.latest = as_beta(fixture.server.latest);
+    fixture.server.releases = "[" + fixture.server.latest + "," + current + "," + older + "]";
+    service.Check(true);
+    Wait(service);
+    CHECK(service.Snapshot().phase == UpdatePhase::kAvailable && !service.Snapshot().kit_needed);
+    fixture.server.urls.clear();
+    playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy("http", "203.0.113.5", "8080", "", "", false));
+    service.Check(true);
+    Wait(service);
+    bool saw_github = false;
+    for (const auto& url : fixture.server.urls) {
+      if (url.find("playden-update.json") == std::string::npos) continue;
+      saw_github = true;
+      CHECK(url.rfind("https://github.com/", 0) == 0);
+      CHECK(url.find("gh.heibang.club") == std::string::npos);
+    }
+    CHECK(saw_github);
+    playden::steam::SetNetworkProxy({});
+    fixture.server.urls.clear();
+    fixture.server.kit_downloads = 0;
+    service.Install();
+    Wait(service);
+    CHECK(service.Snapshot().phase == UpdatePhase::kStaged && fixture.server.kit_downloads == 0);
+    bool saw_app = false;
+    for (const auto& url : fixture.server.urls)
+      if (url.find("playden-ps5-0.11.0-beta.9002.zip") != std::string::npos) {
+        saw_app = true;
+        CHECK(url.rfind("https://gh.heibang.club/github.com/", 0) == 0);
+      }
+    CHECK(saw_app);
+    SetGithubMirror({});
     RemoveTree(fixture.root);
   }
   std::puts("ok");

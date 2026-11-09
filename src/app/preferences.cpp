@@ -21,15 +21,18 @@ std::string ToString(const Bytes& bytes) {
 // web_access (on in older files), version 10 content_language (English in older files, which is what they
 // downloaded), version 11 the launcher dialogs' "Don't show this again" (shown in older files), version 12 the kit
 // whose "Update your games" prompt was shown (none in older files, so they are offered it). Version 13 adds the
-// downloads proxy (off, and not global, in older files).
+// downloads proxy (off, and not global, in older files). Version 14 adds the GitHub mirror (on, at this
+// build's default address, in older files). A version 13 file keeps every proxy field.
 constexpr const char* kKeys[] = {"reduce_motion", "title_store_suffix", "cloud_saves_auto",
                                           "steam_sign_in_password", "downloads_slow_network", "steam_stay_signed_in",
                                           "beta_updates", "download_server", "web_access", "content_language",
                                           "hide_run_once_help", "hide_launcher_help", "runtime_prompt_kit",
                                           "download_proxy_mode", "download_proxy_host", "download_proxy_port",
-                                          "download_proxy_username", "download_proxy_password", "download_proxy_global"};
+                                          "download_proxy_username", "download_proxy_password", "download_proxy_global",
+                                          "github_mirror", "github_mirror_base"};
 
 std::size_t FieldCount(int version) {
+  if (version >= 14) return 21;
   if (version >= 13) return 19;
   if (version >= 11) return static_cast<std::size_t>(version + 1);
   return static_cast<std::size_t>(version);
@@ -93,6 +96,10 @@ bool ParseKeyed(const std::string& serialized, int version, Preferences* prefere
     parsed.download_proxy_username = values[16];
     parsed.download_proxy_password = values[17];
   }
+  if (version >= 14) {
+    if (!ParseFlag(values[19], &parsed.github_mirror)) return false;
+    if (values[20].size() <= 300) parsed.github_mirror_base = values[20];
+  }
   *preferences = std::move(parsed);
   return true;
 }
@@ -118,7 +125,7 @@ PreferencesLoadResult PreferencesStore::Load() const {
 
   std::string serialized = ToString(read.value());
   Preferences keyed;
-  if (ParseKeyed(serialized, 13, &keyed) || ParseKeyed(serialized, 12, &keyed) || ParseKeyed(serialized, 11, &keyed) || ParseKeyed(serialized, 10, &keyed) || ParseKeyed(serialized, 9, &keyed) || ParseKeyed(serialized, 8, &keyed))
+  if (ParseKeyed(serialized, 14, &keyed) || ParseKeyed(serialized, 13, &keyed) || ParseKeyed(serialized, 12, &keyed) || ParseKeyed(serialized, 11, &keyed) || ParseKeyed(serialized, 10, &keyed) || ParseKeyed(serialized, 9, &keyed) || ParseKeyed(serialized, 8, &keyed))
     return PreferencesLoadResult{std::move(keyed), PreferencesLoadStatus::kLoaded, std::string()};
   bool beta_updates = false;
   if (serialized.rfind("version=7\n", 0) == 0) {
@@ -227,7 +234,9 @@ Result<void> PreferencesStore::Save(const Preferences& preferences) const {
   const std::string proxy_mode = preferences.download_proxy_mode == "http" || preferences.download_proxy_mode == "socks5"
                                      ? preferences.download_proxy_mode
                                      : std::string("off");
-  const std::string text = std::string("version=13\nreduce_motion=") + (preferences.reduce_motion ? "1" : "0") +
+  std::string mirror_base = one_line(preferences.github_mirror_base);
+  if (mirror_base.size() > 300) mirror_base.clear();
+  const std::string text = std::string("version=14\nreduce_motion=") + (preferences.reduce_motion ? "1" : "0") +
                            "\ntitle_store_suffix=" + (preferences.title_store_suffix ? "1" : "0") +
                            "\ncloud_saves_auto=" + (preferences.cloud_saves_auto ? "1" : "0") +
                            "\nsteam_sign_in_password=" + (preferences.steam_sign_in_password ? "1" : "0") +
@@ -247,7 +256,9 @@ Result<void> PreferencesStore::Save(const Preferences& preferences) const {
                            "\ndownload_proxy_port=" + one_line(preferences.download_proxy_port) +
                            "\ndownload_proxy_username=" + one_line(preferences.download_proxy_username) +
                            "\ndownload_proxy_password=" + one_line(preferences.download_proxy_password) +
-                           "\ndownload_proxy_global=" + (preferences.download_proxy_global ? "1" : "0") + "\n";
+                           "\ndownload_proxy_global=" + (preferences.download_proxy_global ? "1" : "0") +
+                           "\ngithub_mirror=" + (preferences.github_mirror ? "1" : "0") +
+                           "\ngithub_mirror_base=" + mirror_base + "\n";
   return storage_.WriteAtomic(kPreferencesPath, Bytes(text.begin(), text.end()));
 }
 

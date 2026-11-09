@@ -29,6 +29,7 @@
 #include "runtime/artifact_hash.h"
 #include "runtime/kit_admission.h"
 #include "runtime/kit_trust.h"
+#include "update/github_mirror.h"
 #include "update/update_service.h"
 #include "web/address.h"
 #include "web/server.h"
@@ -357,6 +358,7 @@ int main() {
             playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
                 saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
                 saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
+            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base});
         }
         playden::steam::CmClient cm_client(paths.trust_store, library_storage);
         cm_client.SetOwner("library");
@@ -378,6 +380,7 @@ int main() {
             playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy(
                 saved.download_proxy_mode, saved.download_proxy_host, saved.download_proxy_port,
                 saved.download_proxy_username, saved.download_proxy_password, saved.download_proxy_global));
+            playden::update::SetGithubMirror({saved.github_mirror, saved.github_mirror_base});
             downloads_slow_network.store(saved.downloads_slow_network);
             {
                 std::lock_guard lock(download_server_mutex);
@@ -455,8 +458,8 @@ int main() {
         // runtime admits the kit: an update that did not take puts the previous kit back.
         playden::steam::HttpClient update_http(paths.trust_store);
         playden::update::UpdateConfig update_config;
-        update_config.latest_release_url = "https://api.github.com/repos/leolobato/playden-ps5/releases/latest";
-        update_config.releases_page = "https://github.com/leolobato/playden-ps5/releases";
+        update_config.latest_release_url = playden::update::kUpdateLatestReleaseUrl;
+        update_config.releases_page = playden::update::kUpdateReleasesPage;
         update_config.nightly_page = "https://builds.playden.club/";
         update_config.title_id = PLAYDEN_PS5_TITLE_ID;
         update_config.installed_root = std::string("/data/homebrew/") + PLAYDEN_PS5_TITLE_ID;
@@ -477,6 +480,7 @@ int main() {
             return update_http.Perform(request, cancel);
         };
         update_config.hash_file = [](const std::string& path) { return playden::runtime::HashArtifactFile(path); };
+        update_config.hash_bytes = [](std::string_view bytes) { return playden::runtime::HashArtifactBytes(bytes); };
         // Which kit a folder holds. A newer kit may use a schema or contract this build can't judge;
         // its bytes are vouched for by GitHub's digest and the per-file checks, and the new Playden
         // admits it at startup. Only a kit whose files don't match its own manifest is refused.
@@ -1039,6 +1043,8 @@ int main() {
                     simulation.state().proxy_mode, simulation.state().proxy_host, simulation.state().proxy_port,
                     simulation.state().proxy_username, simulation.state().proxy_password,
                     simulation.state().proxy_global));
+                playden::update::SetGithubMirror(
+                    {simulation.state().github_mirror, simulation.state().github_mirror_base});
                 {
                     std::lock_guard lock(download_server_mutex);
                     download_server = simulation.state().download_server;

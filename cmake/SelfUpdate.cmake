@@ -5,6 +5,13 @@ target_include_directories(playden_miniz PUBLIC "${CMAKE_SOURCE_DIR}/third_party
 target_compile_definitions(playden_miniz PUBLIC MINIZ_NO_TIME MINIZ_NO_ZLIB_COMPATIBLE_NAMES MINIZ_NO_ARCHIVE_WRITING_APIS)
 target_compile_options(playden_miniz PRIVATE -w)
 
+add_library(playden_github_mirror STATIC "${CMAKE_SOURCE_DIR}/src/update/github_mirror.cpp")
+target_include_directories(playden_github_mirror PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_compile_features(playden_github_mirror PUBLIC cxx_std_17)
+if(PLAYDEN_PLATFORM_PS5)
+    target_compile_options(playden_github_mirror PRIVATE -fno-exceptions -fno-rtti)
+endif()
+
 add_library(playden_self_update STATIC
     "${CMAKE_SOURCE_DIR}/src/update/version.cpp"
     "${CMAKE_SOURCE_DIR}/src/update/file_ops.cpp"
@@ -17,7 +24,7 @@ target_include_directories(playden_self_update PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_compile_features(playden_self_update PUBLIC cxx_std_17)
 target_compile_definitions(playden_self_update PRIVATE PLAYDEN_VERSION="${PLAYDEN_FULL_VERSION}"
     PLAYDEN_BUILD_COMMIT="${PLAYDEN_BUILD_COMMIT}" PLAYDEN_NIGHTLY_BASE="${PLAYDEN_BUILD_NIGHTLY_BASE}")
-target_link_libraries(playden_self_update PUBLIC playden_miniz playden_steam_protocol playden_steam_http Threads::Threads)
+target_link_libraries(playden_self_update PUBLIC playden_github_mirror playden_miniz playden_steam_protocol playden_steam_http Threads::Threads)
 if(PLAYDEN_PLATFORM_PS5)
     target_compile_options(playden_self_update PRIVATE -fno-exceptions -fno-rtti)
 endif()
@@ -31,6 +38,9 @@ if(BUILD_TESTING AND NOT PLAYDEN_PLATFORM_PS5)
             PLAYDEN_BUILD_COMMIT="${PLAYDEN_BUILD_COMMIT}")
         add_test(NAME ${test_name} COMMAND ${test_name}_test)
     endforeach()
+    add_executable(github_mirror_test "${CMAKE_SOURCE_DIR}/tests/github_mirror_test.cpp")
+    target_link_libraries(github_mirror_test PRIVATE playden_github_mirror)
+    add_test(NAME github_mirror COMMAND github_mirror_test)
 endif()
 
 if(BUILD_TESTING AND NOT PLAYDEN_PLATFORM_PS5)

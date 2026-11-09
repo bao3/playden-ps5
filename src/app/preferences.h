@@ -1,6 +1,7 @@
 #pragma once
 
 #include "platform/storage.h"
+#include "update/github_mirror.h"
 
 #include <string>
 
@@ -47,6 +48,10 @@ struct Preferences {
   std::string download_proxy_password;
   // Off: the proxy is for downloads only. On: Steam sign-in and other external connections use it too.
   bool download_proxy_global = false;
+  // GitHub release downloads. On uses github_mirror_base when the downloads proxy is Off.
+  // API metadata is not sent there. Older preference files get this build's defaults.
+  bool github_mirror = true;
+  std::string github_mirror_base = update::kDefaultGithubMirrorBase;
 };
 
 enum class PreferencesLoadStatus {

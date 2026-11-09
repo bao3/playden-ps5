@@ -182,8 +182,15 @@ Since 0.3.0, Playden updates itself from this repository's GitHub releases:
   shows it again later.
 
 Settings › Updates › **Beta updates** opts into test versions before their stable release. It is off by default;
-betas can have new bugs and use the same app and data. Turning it off keeps an installed beta until a newer stable
-version is available. Updates never downgrade Playden.
+betas can have new bugs and use the same app and data. This build is a beta of bao3/playden-ps5. While the
+installed version is a beta, Playden still offers a newer beta from that repository. Turning Beta updates off does
+not hide those, and it does not point the check back at another repository. After a stable version is installed,
+Beta updates chooses whether later betas are offered. Updates never downgrade Playden.
+
+Playden reads release information from GitHub's API. That request stays direct unless Global proxy is on. Release
+files can come from the GitHub mirror in Settings › Downloads. This build starts with that mirror on, at
+`https://gh.heibang.club`. An HTTP or SOCKS5 proxy pauses the mirror until Proxy is Off. The bytes are still
+checked against the checksum GitHub's API published. The mirror is not used for the API itself.
 
 The previous app and kit are kept until the next update, in `/data/playden/self-update/backup/` and
 `/data/playden/kits/.previous-*`. Settings › Updates › **Go back to Playden <version>** puts them back: Playden
@@ -407,6 +414,7 @@ build/homebrew-host/playden-homebrew --simulation --scenario signed-out
   **Downloads for slow networks**: Playden then downloads 8 pieces at the same time instead of 4. On a fast connection
   it can be slower, so turn it off again if downloads get slower. If downloads stay slow, open Settings › Downloads ›
   **Download server**, use **Test servers** and choose the fastest server. The test downloads up to 160 MB.
+  Settings › Downloads › **GitHub mirror** is separate from that proxy. It only fetches Playden release files.
   Or choose **Fastest**: each download of 200 MB or more then starts with a short test on its own files, uses the
   fastest server and tests again if that server slows down. **Steam default** is still the default: it uses the
   server Steam lists first. Each provider chooses its nearby server through DNS or anycast, so your DNS resolver
