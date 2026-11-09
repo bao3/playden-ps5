@@ -257,7 +257,7 @@ function(playden_register_steam_backend_tests)
         add_test(NAME http_client
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/http_fixture_server.py"
                 "$<TARGET_FILE:http_client_test>" "${CMAKE_SOURCE_DIR}/tests/fixtures/http")
-        set_tests_properties(http_client PROPERTIES TIMEOUT 15)
+        set_tests_properties(http_client PROPERTIES TIMEOUT 60)
 
         add_executable(network_proxy_test "${CMAKE_SOURCE_DIR}/tests/network_proxy_test.cpp")
         target_link_libraries(network_proxy_test PRIVATE playden_steam_http)

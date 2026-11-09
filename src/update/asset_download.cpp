@@ -130,7 +130,10 @@ bool JsonDocument(const steam::HttpResponse& response) {
   std::string type = Header(response, "content-type");
   for (char& c : type)
     if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-  if (type.find("json") == std::string::npos) return false;
+  const auto semi = type.find(';');
+  if (semi != std::string::npos) type.resize(semi);
+  while (!type.empty() && (type.back() == ' ' || type.back() == '\t')) type.pop_back();
+  if (!type.empty() && type.find("json") == std::string::npos) return false;
   std::size_t i = 0;
   while (i < response.body.size() && (response.body[i] == ' ' || response.body[i] == '\n' || response.body[i] == '\r' ||
                                       response.body[i] == '\t'))
@@ -260,7 +263,9 @@ std::optional<std::string> FetchSmall(const std::string& url, std::size_t limit,
         *error = Describe(response);
         return std::nullopt;
       }
-      if (accept.find("json") != std::string::npos && !JsonDocument(response)) {
+      const bool api = target.rfind("https://api.github.com/", 0) == 0 ||
+                       target.find("/https://api.github.com/") != std::string::npos;
+      if (api && !JsonDocument(response)) {
         *error = "blocked: GitHub's API did not return JSON";
         return std::nullopt;
       }

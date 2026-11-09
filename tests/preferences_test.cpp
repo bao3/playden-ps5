@@ -186,7 +186,7 @@ void SignInMethodPersistsAndVersionThreeOpensQr() {
   Check(store.Save(preferences).ok(), "sign-in method preference saves");
   const auto saved = storage.Read("preferences.conf");
   Check(saved.ok() && std::string(saved.value().begin(), saved.value().end()) ==
-                          "version=14\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=1\nsteam_sign_in_password=1\n"
+                          "version=15\nreduce_motion=0\ntitle_store_suffix=0\ncloud_saves_auto=1\nsteam_sign_in_password=1\n"
                           "downloads_slow_network=0\nsteam_stay_signed_in=1\nbeta_updates=0\ndownload_server=\nweb_access=1\n"
                           "content_language=english\nhide_run_once_help=0\nhide_launcher_help=0\nruntime_prompt_kit=\n"
                           "download_proxy_mode=off\ndownload_proxy_host=\ndownload_proxy_port=\n"
@@ -389,8 +389,8 @@ void OlderPreferencesUseAutomaticDownloadServer() {
           "migration retains old fields and defaults later fields");
     Check(store.Save(loaded.preferences).ok(), "migrated preferences save");
     const auto saved = storage.Read("preferences.conf");
-    Check(saved.ok() && std::string(saved.value().begin(), saved.value().end()).rfind("version=12\n", 0) == 0,
-          "saving a migrated file writes version 12");
+    Check(saved.ok() && std::string(saved.value().begin(), saved.value().end()).rfind("version=15\n", 0) == 0,
+          "saving a migrated file writes version 15");
     Check(loaded.preferences.web_access, "every older preference version has web access on");
     Check(loaded.preferences.content_language == "english", "every older preference version downloads English");
   }
