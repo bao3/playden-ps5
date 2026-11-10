@@ -1,5 +1,8 @@
 #include "update/asset_download.h"
 #include "update/file_ops.h"
+#include "update/github_mirror.h"
+
+#include "steam/backend/network_proxy.h"
 #include "zip_fixture.h"
 
 #include <cstdio>
@@ -217,8 +220,135 @@ int main() {
     github.body = body;
     github.ignore_range = true;
     std::string error;
-    const auto text = FetchSmall(kPage, 1024, Options(github, body), "application/json", &error);
+    const auto text = FetchSmall(kPage, 1024, Options(github, body), "application/json", &error, true);
     CHECK(text && *text == body);
+  }
+  FakeGitHub holder;
+  holder.body = body;
+  const std::string mirrored = "https://mirror.example/https://github.com/o/r/releases/download/v1/a.zip";
+  const auto ranged = [&](const std::string& bytes, const std::string& range) {
+    HttpResponse response;
+    if (range.rfind("bytes=", 0) != 0) {
+      response.status_code = 200;
+      response.body.assign(bytes.begin(), bytes.end());
+      return response;
+    }
+    const auto dash = range.find('-');
+    const std::size_t from = std::stoull(range.substr(6, dash - 6));
+    const std::size_t to = std::min<std::size_t>(std::stoull(range.substr(dash + 1)), bytes.size() - 1);
+    response.status_code = 206;
+    response.body.assign(bytes.begin() + static_cast<std::ptrdiff_t>(from), bytes.begin() + static_cast<std::ptrdiff_t>(to + 1));
+    response.headers.push_back({"Content-Range", "bytes " + std::to_string(from) + "-" + std::to_string(to) + "/" +
+                                                     std::to_string(bytes.size())});
+    return response;
+  };
+  // The mirror is the only host asked. A redirect back to GitHub is not followed.
+  {
+    SetGithubMirror({true, "https://mirror.example"});
+    std::vector<std::string> urls;
+    DownloadOptions options = Options(holder, body);
+    options.fetch = [&](const HttpRequest& request, const std::atomic<bool>&) {
+      urls.push_back(request.url);
+      for (const auto& header : request.headers)
+        CHECK(header.first != "Authorization" && header.first != "Cookie" && header.first != "Proxy-Authorization");
+      HttpResponse response;
+      if (urls.size() == 1) {
+        response.status_code = 302;
+        response.headers.push_back({"Location", kPage});
+        return response;
+      }
+      response.status_code = 500;
+      return response;
+    };
+    const auto result = DownloadAsset(kPage, body.size(), good, root + "/mirror-redirect.zip", options);
+    CHECK(!result.ok && result.error.find("another host") != std::string::npos && urls.size() == 1 && urls[0] == mirrored);
+    SetGithubMirror({});
+  }
+  // An HTML block page fails once and is not saved.
+  {
+    SetGithubMirror({true, "https://mirror.example/"});
+    int calls = 0;
+    DownloadOptions options = Options(holder, body);
+    options.max_attempts = 4;
+    options.fetch = [&](const HttpRequest& request, const std::atomic<bool>&) {
+      ++calls;
+      CHECK(request.url == mirrored);
+      HttpResponse response;
+      response.status_code = 429;
+      response.headers.push_back({"Content-Type", "text/html; charset=utf-8"});
+      const std::string page = "<!DOCTYPE html><title>Rate limit</title>";
+      response.body.assign(page.begin(), page.end());
+      return response;
+    };
+    const auto result = DownloadAsset(kPage, body.size(), good, root + "/mirror-html.zip", options);
+    CHECK(!result.ok && result.error.find("web page") != std::string::npos && calls == 1 && !Exists(root + "/mirror-html.zip"));
+    SetGithubMirror({});
+  }
+  // HTTP 429 waits for Retry-After, capped at 60 seconds, and stays on the mirror.
+  {
+    SetGithubMirror({true, "https://mirror.example"});
+    int calls = 0;
+    std::vector<int> waits;
+    DownloadOptions options = Options(holder, body);
+    options.wait_seconds = [&](int seconds) { waits.push_back(seconds); };
+    options.fetch = [&](const HttpRequest& request, const std::atomic<bool>&) {
+      ++calls;
+      CHECK(request.url == mirrored);
+      if (calls == 1) {
+        HttpResponse response;
+        response.status_code = 429;
+        response.headers.push_back({"Content-Type", "text/plain"});
+        response.headers.push_back({"Retry-After", "120"});
+        return response;
+      }
+      std::string range;
+      for (const auto& header : request.headers)
+        if (header.first == "Range") range = header.second;
+      return ranged(body, range);
+    };
+    CHECK(DownloadAsset(kPage, body.size(), good, root + "/mirror-429.zip", options).ok);
+    CHECK(waits.size() == 1 && waits[0] == 60);
+    std::string text;
+    CHECK(ReadSmallFile(root + "/mirror-429.zip", &text) && text == body);
+    SetGithubMirror({});
+  }
+  // A mirror that is on with an unusable address does not fall back to GitHub.
+  {
+    SetGithubMirror({true, "https://127.0.0.1"});
+    int calls = 0;
+    DownloadOptions options = Options(holder, body);
+    options.fetch = [&](const HttpRequest&, const std::atomic<bool>&) {
+      ++calls;
+      return HttpResponse{};
+    };
+    const auto result = DownloadAsset(kPage, body.size(), good, root + "/mirror-bad.zip", options);
+    CHECK(!result.ok && result.error.find("isn't valid") != std::string::npos && calls == 0);
+    SetGithubMirror({});
+  }
+  // An HTTP proxy, even when it is not global, keeps the original GitHub URL.
+  {
+    SetGithubMirror({true, "https://mirror.example"});
+    playden::steam::SetNetworkProxy(playden::steam::MakeNetworkProxy("http", "203.0.113.5", "8080", "", "", false));
+    std::vector<std::string> urls;
+    DownloadOptions options = Options(holder, body);
+    options.fetch = [&](const HttpRequest& request, const std::atomic<bool>&) {
+      urls.push_back(request.url);
+      CHECK(request.download_proxy);
+      std::string range;
+      for (const auto& header : request.headers)
+        if (header.first == "Range") range = header.second;
+      if (request.url != kPage) {
+        HttpResponse response;
+        response.status_code = 404;
+        return response;
+      }
+      return ranged(body, range);
+    };
+    CHECK(DownloadAsset(kPage, body.size(), good, root + "/proxy-direct.zip", options).ok);
+    CHECK(!urls.empty() && urls.front() == kPage);
+    for (const auto& url : urls) CHECK(url.find("mirror.example") == std::string::npos);
+    playden::steam::SetNetworkProxy({});
+    SetGithubMirror({});
   }
   RemoveTree(root);
   std::puts("ok");

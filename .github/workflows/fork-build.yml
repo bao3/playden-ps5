@@ -1,0 +1,80 @@
+# Build and test this fork. This workflow does not publish a release.
+name: Fork build
+
+on:
+  pull_request:
+  push:
+    branches: [cursor/clean-mirror-rebuild-8f6b]
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    # macos-13 was removed on 2025-12-04 and macOS 14 on 2026-11-02.
+    # macos-15-intel is a current standard GitHub-hosted Intel label.
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install the host toolchain
+        run: brew install cmake ninja pkgconf sdl2-compat
+      - name: Build and run the selected tests
+        env:
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+        run: |
+          set -euo pipefail
+          scripts/build-homebrew.sh
+          cmake --build --preset homebrew-host --target \
+            preferences_test network_proxy_test proxy_transport_test \
+            http_client_test cm_client_test github_mirror_test fork_downloads_test \
+            self_update_version_test self_update_download_test self_update_service_test \
+            homebrew_library_model_test homebrew_live_model_test
+          ctest --preset homebrew-host --output-on-failure \
+            -R '^(preferences|network_proxy|proxy_transport|http_client|cm_client|github_mirror|fork_downloads|self_update_version|self_update_download|self_update_service|homebrew_library_model|homebrew_live_model)$'
+
+  ps5-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install the PS5 cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang-18 lld-18 cmake curl git ninja-build \
+            python3 unzip zip llvm-18 libdigest-sha-perl
+          bindir=$(llvm-config-18 --bindir)
+          if [[ ! -e "$bindir/clang" ]]; then sudo ln -sfn "$(command -v clang-18)" "$bindir/clang"; fi
+          if [[ ! -e "$bindir/clang++" ]]; then sudo ln -sfn "$(command -v clang++-18)" "$bindir/clang++"; fi
+          test -x "$bindir/clang"
+          test -x "$bindir/ld.lld"
+      - name: Build the PS5 package
+        env:
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+          PLAYDEN_ACCEPT_PS5_CURL_REBUILD: "1"
+        run: |
+          set -euo pipefail
+          export PATH="$(llvm-config-18 --bindir):$PATH"
+          export HOST_CXX=clang++
+          scripts/fetch-deps.sh
+          scripts/build-lapy-helper.sh
+          scripts/build-homebrew-ps5.sh
+          version=$(tr -d '[:space:]' < build/homebrew-ps5/dist/FAKE77031/playden-version)
+          python3 - "$version" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path("CMakeLists.txt").read_text()
+          match = re.search(r"project\(PlaydenLauncher VERSION ([0-9]+\.[0-9]+\.[0-9]+)", text)
+          if not match or sys.argv[1] != match.group(1) + "b":
+              raise SystemExit("playden-version is not the upstream version plus b")
+          PY
+          python3 - <<'PY'
+          import json, pathlib, re
+          param = json.loads(pathlib.Path("build/homebrew-ps5/dist/FAKE77031/sce_sys/param.json").read_text())
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", param["contentVersion"]):
+              raise SystemExit("contentVersion must stay numeric")
+          PY

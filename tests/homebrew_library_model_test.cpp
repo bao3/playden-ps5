@@ -1885,7 +1885,10 @@ void live_storage_section_and_installed_games() {
     std::vector<std::string> downloads;
     for (const auto& row : model.view().rows) if (row.section == "Downloads") downloads.push_back(row.key);
     check(downloads == std::vector<std::string>{"settings-content-language", "settings-downloads-slow",
-                                                "settings-download-server"},
+                                                "settings-download-server", "settings-proxy-mode", "settings-proxy-global",
+                                                "settings-proxy-host", "settings-proxy-port", "settings-proxy-username",
+                                                "settings-proxy-password", "settings-github-mirror",
+                                                "settings-github-mirror-base", "settings-github-api-base"},
           "Downloads holds the download language, the slow-network toggle and the download server");
     {
         const auto* language = find_row(model, "settings-content-language");
@@ -1962,9 +1965,9 @@ void live_storage_section_and_installed_games() {
               model.view().rows[static_cast<std::size_t>(model.view().focused_row)].section == "Storage",
           "Up on Storage's first row does not leave the section");
     if (model.state().navigation.tabs_focused) model.action("down");
-    check(model.action("focus:settings-download-server"), "Download server is focused");
+    check(model.action("focus:settings-github-api-base"), "GitHub API address is focused");
     model.action("down");
-    check(model.state().navigation.focus_key == "settings-download-server", "Down on Downloads' last row stays on it");
+    check(model.state().navigation.focus_key == "settings-github-api-base", "Down on Downloads' last row stays on it");
     model.action("left");
     model.action("down");
     model.action("right");

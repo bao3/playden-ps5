@@ -29,7 +29,9 @@
 #include "platform/ps5/system_keyboard.h"
 #include "runtime/artifact_hash.h"
 #include "runtime/kit_admission.h"
+#include "app/fork_downloads.h"
 #include "runtime/kit_trust.h"
+#include "update/github_mirror.h"
 #include "update/update_service.h"
 #include "web/address.h"
 #include "web/server.h"
@@ -49,6 +51,7 @@
 #include "steam/backend/steam_install_runner.h"
 #include "steam/backend/steam_cloud_runner.h"
 #include "steam/backend/library_client.h"
+#include "steam/backend/network_proxy.h"
 #include "steam/local_session_repository.h"
 #include "library/cache.h"
 #include "platform/ps5/display_egl.hpp"
@@ -395,6 +398,8 @@ int main() {
         playden::LibraryCache library_cache(library_storage);
         playden::LibraryService library_service(library_backend,library_sessions,&library_cache);
         playden::PreferencesStore preferences(library_storage);
+        playden::MigrateForkPreferences(library_storage);
+        playden::ApplyForkDownloads(playden::LoadForkDownloads(library_storage));
         {
             // A download resumed at startup starts before the UI has loaded the settings: it reads the saved ones.
             const auto saved = preferences.Load().preferences;
@@ -475,8 +480,8 @@ int main() {
         // runtime admits the kit: an update that did not take puts the previous kit back.
         playden::steam::HttpClient update_http(paths.trust_store);
         playden::update::UpdateConfig update_config;
-        update_config.latest_release_url = "https://api.github.com/repos/leolobato/playden-ps5/releases/latest";
-        update_config.releases_page = "https://github.com/leolobato/playden-ps5/releases";
+        update_config.latest_release_url = playden::update::kUpdateLatestReleaseUrl;
+        update_config.releases_page = playden::update::kUpdateReleasesPage;
         update_config.nightly_page = "https://builds.playden.club/";
         update_config.title_id = PLAYDEN_PS5_TITLE_ID;
         update_config.installed_root = std::string("/data/homebrew/") + PLAYDEN_PS5_TITLE_ID;
@@ -497,6 +502,7 @@ int main() {
             return update_http.Perform(request, cancel);
         };
         update_config.hash_file = [](const std::string& path) { return playden::runtime::HashArtifactFile(path); };
+        update_config.hash_bytes = [](std::string_view bytes) { return playden::runtime::HashArtifactBytes(bytes); };
         // Which kit a folder holds. A newer kit may use a schema or contract this build can't judge;
         // its bytes are vouched for by GitHub's digest and the per-file checks, and the new Playden
         // admits it at startup. Only a kit whose files don't match its own manifest is refused.
@@ -1136,6 +1142,26 @@ int main() {
             services.Tick();
             // Until the UI has the saved settings, its defaults would replace them.
             if (simulation.PreferencesLoaded()) {
+                static bool fork_loaded = false;
+                static playden::ForkDownloads applied;
+                if (!fork_loaded) {
+                    applied = playden::LoadForkDownloads(library_storage);
+                    simulation.ApplyForkDownloads(applied);
+                    playden::ApplyForkDownloads(applied);
+                    fork_loaded = true;
+                }
+                const auto current = simulation.ExportForkDownloads();
+                const bool changed = current.proxy_mode != applied.proxy_mode || current.proxy_host != applied.proxy_host ||
+                                     current.proxy_port != applied.proxy_port || current.proxy_username != applied.proxy_username ||
+                                     current.proxy_password != applied.proxy_password || current.proxy_global != applied.proxy_global ||
+                                     current.github_mirror != applied.github_mirror ||
+                                     current.github_mirror_base != applied.github_mirror_base ||
+                                     current.github_api_base != applied.github_api_base;
+                if (changed) {
+                    playden::ApplyForkDownloads(current);
+                    (void)playden::SaveForkDownloads(library_storage, current);
+                    applied = current;
+                }
                 downloads_slow_network.store(simulation.state().downloads_slow_network);
                 {
                     std::lock_guard lock(download_server_mutex);

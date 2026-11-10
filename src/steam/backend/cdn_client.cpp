@@ -80,6 +80,7 @@ CdnError CdnClient::Get(const std::string& url, std::size_t max_bytes, std::uint
   request.url = url;
   request.allow_plain_http = plain_http;
   request.depot_manifest = depot_manifest;
+  request.download_proxy = true;
   request.headers = {{"User-Agent", "Valve/Steam HTTP Client 1.0"}};
   request.timeout_ms = timeout_ms;
   request.max_response_bytes = max_bytes;

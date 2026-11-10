@@ -22,6 +22,9 @@ struct DownloadOptions {
   std::uint64_t chunk_bytes = 8 << 20;  // one Range request
   int max_attempts = 5;                 // per chunk, for network errors and server errors
   std::function<void(int attempt)> wait_before_retry;  // default: 2 s per attempt, ending early on cancel
+  // When a response carries Retry-After, that wait replaces the attempt backoff. The seconds are
+  // already capped at 60. Unset: sleep, ending early on cancel.
+  std::function<void(int seconds)> wait_seconds;
   std::function<void(std::uint64_t done, std::uint64_t total)> progress;
   std::function<void(const std::string& line)> log;
   std::function<std::optional<std::string>(const std::string& path)> hash_file;  // SHA-256 hex
@@ -44,7 +47,9 @@ DownloadResult DownloadAsset(const std::string& url, std::uint64_t size, const s
 bool AllowedDownloadUrl(const std::string& url);
 
 // A JSON or other small GET (at most limit bytes), following allowed redirects. Empty on failure.
+// through_download_proxy sends the request on the downloads proxy. Release files use that. GitHub's
+// API does not, so it stays direct unless Global proxy is on.
 std::optional<std::string> FetchSmall(const std::string& url, std::size_t limit, const DownloadOptions& options,
-                                      const std::string& accept, std::string* error);
+                                      const std::string& accept, std::string* error, bool through_download_proxy);
 
 }  // namespace playden::update

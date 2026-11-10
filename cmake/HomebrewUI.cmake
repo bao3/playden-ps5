@@ -207,7 +207,7 @@ add_library(playden_homebrew_model STATIC
     "${CMAKE_SOURCE_DIR}/src/homebrew/store_art.cpp")
 target_compile_features(playden_homebrew_model PUBLIC cxx_std_20)
 # The model builds share and vote requests and decides what Share does (community/), never sending them.
-target_link_libraries(playden_homebrew_model PUBLIC playden_library playden_diagnostic_log playden_steam_cm_codec playden_community playden_preferences)
+target_link_libraries(playden_homebrew_model PUBLIC playden_library playden_diagnostic_log playden_steam_cm_codec playden_community playden_preferences playden_github_mirror)
 target_include_directories(playden_homebrew_model PUBLIC "${CMAKE_SOURCE_DIR}/src")
 
 foreach(qr_file qrcodegen.c qrcodegen.h LICENSE README.md)

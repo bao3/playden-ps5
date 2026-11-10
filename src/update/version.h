@@ -18,12 +18,16 @@ struct Version {
   // is built on that release (NightlyBase).
   unsigned nightly_date = 0;
   unsigned nightly_build = 0;
+  // This fork's build of that upstream version. Written as a trailing "b" ("0.11.0b",
+  // "0.11.0-beta.1b"). Not a SemVer pre-release and not build metadata. A second build of the
+  // same upstream version compares equal; there is no further revision in this scheme.
+  bool fork_build = false;
 
   bool nightly() const { return nightly_date != 0; }
-  std::string ToString() const;  // "0.2.0", "0.7.1-beta.1", "0.8.0-nightly.20261027.1"
+  std::string ToString() const;  // "0.2.0", "0.7.1-beta.1", "0.8.0-nightly.20261027.1", "0.11.0b"
   friend bool operator==(const Version& a, const Version& b) {
     return a.major == b.major && a.minor == b.minor && a.patch == b.patch && a.beta == b.beta &&
-           a.nightly_date == b.nightly_date && a.nightly_build == b.nightly_build;
+           a.nightly_date == b.nightly_date && a.nightly_build == b.nightly_build && a.fork_build == b.fork_build;
   }
   friend bool operator!=(const Version& a, const Version& b) { return !(a == b); }
   friend bool operator<(const Version& a, const Version& b) {
@@ -33,14 +37,20 @@ struct Version {
     // Nightly, then beta, then stable.
     const auto rank = [](const Version& v) { return v.nightly() ? 0 : v.beta ? 1 : 2; };
     if (rank(a) != rank(b)) return rank(a) < rank(b);
-    if (a.nightly()) return a.nightly_date != b.nightly_date ? a.nightly_date < b.nightly_date : a.nightly_build < b.nightly_build;
-    return a.beta < b.beta;
+    if (a.nightly()) {
+      if (a.nightly_date != b.nightly_date) return a.nightly_date < b.nightly_date;
+      if (a.nightly_build != b.nightly_build) return a.nightly_build < b.nightly_build;
+    } else if (a.beta != b.beta) {
+      return a.beta < b.beta;
+    }
+    return !a.fork_build && b.fork_build;
   }
 };
 
 // Three dot-separated numbers, with an optional leading "v". Each part is 1-6 digits (param.json
 // pads them with zeros). Optional suffix: -beta.N, N is 1-999999 with no leading zero; or
-// -nightly.YYYYMMDD.N, N is 1-999 with no leading zero.
+// -nightly.YYYYMMDD.N, N is 1-999 with no leading zero. A final "b" marks this fork's build of
+// that upstream version. "b" is not a SemVer pre-release identifier.
 std::optional<Version> ParseVersion(std::string_view text);
 
 // The version this build was made from (CMake's PROJECT_VERSION and pre-release suffix).

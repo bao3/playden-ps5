@@ -178,6 +178,7 @@ DownloadServerRate CdnDownloadServerSource::Measure(const std::string& id, std::
         request.max_response_bytes = chunk.cap;
         request.timeout_ms = timeout;
         request.allow_plain_http = !server.https;
+        request.download_proxy = true;
         const auto response = hooks_.perform ? hooks_.perform(slot, request, cancel) : http->Perform(request, cancel);
         std::lock_guard<std::mutex> lock(mutex);
         // Reserve the full cap even for failed transfers: retries cannot spend the budget twice.

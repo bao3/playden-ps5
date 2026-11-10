@@ -1,4 +1,5 @@
 #include "steam/backend/cm_client.h"
+#include "steam/backend/network_proxy.h"
 
 #include "steam/backend/app_info_http.h"
 #include "steam/backend/auth_messages.h"
@@ -246,6 +247,7 @@ CmError FromTransport(HttpError error) {
     case HttpError::kTimeout: return CmError::kTimeout;
     case HttpError::kProtocolError:
     case HttpError::kResponseTooLarge: return CmError::kProtocol;
+    case HttpError::kProxyFailed: return CmError::kProxy;
     default: return CmError::kNetwork;
   }
 }
@@ -261,6 +263,7 @@ const char* CmErrorName(CmError error) {
     case CmError::kRejected: return "rejected";
     case CmError::kProtocol: return "protocol";
     case CmError::kTimeout: return "timeout";
+    case CmError::kProxy: return "proxy";
   }
   return "protocol";
 }
@@ -687,6 +690,9 @@ class CmSharedSession {
       {
         std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
         if (lock && session_) {
+          if (proxy_generation_ != NetworkProxyGeneration()) Drop();
+        }
+        if (lock && session_) {
           session_->Rebind(Clock::now() + std::chrono::milliseconds(100), kNoCancel);
           const auto idle = session_->Idle();
           if (idle != CmError::kTimeout && idle != CmError::kNone) Drop();
@@ -732,6 +738,7 @@ class CmSharedSession {
   std::uint64_t licensed_account_ = 0;
   std::set<std::uint32_t> licensed_packages_;
   std::atomic<std::uint64_t> license_changes_{0};
+  std::uint64_t proxy_generation_ = 0;
   std::mutex stop_mutex_;
   std::condition_variable stop_wake_;
   bool stop_ = false;
@@ -791,6 +798,10 @@ CmError CmClient::Acquire(const StoredSession& stored, const std::atomic<bool>& 
     lease->hold.try_lock();
   }
   deadline += Clock::now() - wait_start;
+  if (shared_->proxy_generation_ != NetworkProxyGeneration()) {
+    shared_->Drop();
+    shared_->proxy_generation_ = NetworkProxyGeneration();
+  }
   const std::string key = std::to_string(stored.steam_id) + ":" + stored.refresh_token;
   if (shared_->session_ && key == shared_->key_ && shared_->session_->usable()) {
     shared_->session_->Rebind(deadline, cancel);
@@ -1400,6 +1411,7 @@ AuthResult RenewThroughCm(CmClient& client, const StoredSession& session,
     case CmError::kRejected: return {AuthError::kCredentialsRevoked, std::nullopt};
     case CmError::kNetwork:
     case CmError::kTimeout: return {AuthError::kNetwork, std::nullopt};
+    case CmError::kProxy: return {AuthError::kProxy, std::nullopt};
     case CmError::kProtocol: return {AuthError::kProtocol, std::nullopt};
   }
   const auto now = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(

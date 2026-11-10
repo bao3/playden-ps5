@@ -4494,6 +4494,33 @@ playden::Preferences Simulation::ExportPreferences() const {
             state_.reports_explained, state_.share_as, state_.ask_after_games};
 }
 
+void Simulation::ApplyForkDownloads(const playden::ForkDownloads& downloads) {
+    steam::ZeroizeSecret(state_.proxy_password);
+    state_.proxy_mode = downloads.proxy_mode;
+    state_.proxy_host = downloads.proxy_host;
+    state_.proxy_port = downloads.proxy_port;
+    state_.proxy_username = downloads.proxy_username;
+    state_.proxy_password = downloads.proxy_password;
+    state_.proxy_global = downloads.proxy_global;
+    state_.github_mirror = downloads.github_mirror;
+    state_.github_mirror_base = downloads.github_mirror_base;
+    state_.github_api_base = downloads.github_api_base;
+}
+
+playden::ForkDownloads Simulation::ExportForkDownloads() const {
+    playden::ForkDownloads downloads;
+    downloads.proxy_mode = state_.proxy_mode;
+    downloads.proxy_host = state_.proxy_host;
+    downloads.proxy_port = state_.proxy_port;
+    downloads.proxy_username = state_.proxy_username;
+    downloads.proxy_password = state_.proxy_password;
+    downloads.proxy_global = state_.proxy_global;
+    downloads.github_mirror = state_.github_mirror;
+    downloads.github_mirror_base = state_.github_mirror_base;
+    downloads.github_api_base = state_.github_api_base;
+    return downloads;
+}
+
 void Simulation::apply_organization_snapshot(const playden::OrganizationSnapshot& snapshot) {
     const auto prior_selected_id = state_.navigation.selected_game_id;
     state_.library.favorites = snapshot.favorites;
@@ -8919,6 +8946,33 @@ void Simulation::rebuild_view() {
                 : listed && !offered ? "Not offered on this network now. Steam default is used."
                 : "If it stops answering, Playden uses another one.";
         }
+        {
+            auto& mode = add("settings-proxy-mode", RowKind::Action, "Proxy", "cycle-proxy-mode");
+            mode.value = state_.proxy_mode == "http" ? "HTTP" : state_.proxy_mode == "socks5" ? "SOCKS5" : "Off";
+            mode.subtitle = "Off uses no proxy. HTTP or SOCKS5 pauses the GitHub mirror.";
+            auto& global = add("settings-proxy-global", RowKind::Toggle, "Global proxy", "toggle-proxy-global");
+            global.selected = state_.proxy_global;
+            global.subtitle = state_.proxy_global ? "Also used for Steam sign-in." : "Downloads only. Sign-in stays direct.";
+            auto& host = add("settings-proxy-host", RowKind::Action, "Proxy address", "edit-proxy-host");
+            host.value = state_.proxy_host.empty() ? "Not set" : state_.proxy_host;
+            auto& port = add("settings-proxy-port", RowKind::Action, "Proxy port", "edit-proxy-port");
+            port.value = state_.proxy_port.empty() ? "Not set" : state_.proxy_port;
+            auto& user = add("settings-proxy-username", RowKind::Action, "Proxy username", "edit-proxy-username");
+            user.value = state_.proxy_username.empty() ? "Not set" : state_.proxy_username;
+            auto& password = add("settings-proxy-password", RowKind::Action, "Proxy password", "edit-proxy-password");
+            password.value = state_.proxy_password.empty() ? "Not set" : "Saved";
+            password.subtitle = "Hidden while you type it.";
+            auto& mirror = add("settings-github-mirror", RowKind::Toggle, "GitHub mirror", "toggle-github-mirror");
+            mirror.selected = state_.github_mirror && state_.proxy_mode == "off";
+            mirror.enabled = state_.proxy_mode == "off";
+            mirror.subtitle = state_.proxy_mode == "off" ? "Release files and the update check use the mirror address."
+                                                         : "Paused while a proxy is on.";
+            auto& base = add("settings-github-mirror-base", RowKind::Action, "Mirror address", "edit-github-mirror-base");
+            base.value = state_.github_mirror_base.empty() ? "Not set" : state_.github_mirror_base;
+            base.subtitle = "An https origin, such as https://mirror.example.";
+            auto& api = add("settings-github-api-base", RowKind::Action, "GitHub API address", "edit-github-api-base");
+            api.value = state_.github_api_base.empty() ? "Not set" : state_.github_api_base;
+        }
         section = "Display";
         auto& motion = add("settings-motion", RowKind::Toggle, "Reduced motion", "toggle-motion");
         motion.selected = state_.reduced_motion;
@@ -9553,6 +9607,25 @@ void Simulation::commit_editor() {
         state_.editor.secret = false;
         state_.editor.revealed = false;
         state_.navigation.focus_key = next;
+        return;
+    }
+    if (state_.editor.purpose == "Proxy address" || state_.editor.purpose == "Proxy port" ||
+        state_.editor.purpose == "Proxy username" || state_.editor.purpose == "Proxy password" ||
+        state_.editor.purpose == "Mirror address" || state_.editor.purpose == "GitHub API address") {
+        if (state_.editor.purpose == "Proxy address") state_.proxy_host = trimmed(state_.editor.value);
+        else if (state_.editor.purpose == "Proxy port") state_.proxy_port = trimmed(state_.editor.value);
+        else if (state_.editor.purpose == "Proxy username") state_.proxy_username = trimmed(state_.editor.value);
+        else if (state_.editor.purpose == "Proxy password") {
+            steam::ZeroizeSecret(state_.proxy_password);
+            state_.proxy_password = state_.editor.value;
+        }
+        else if (state_.editor.purpose == "Mirror address") state_.github_mirror_base = trimmed(state_.editor.value);
+        else state_.github_api_base = trimmed(state_.editor.value);
+        if (state_.editor.secret) { steam::ZeroizeSecret(state_.editor.value); steam::ZeroizeSecret(state_.editor.original); }
+        state_.editor.active = false;
+        state_.editor.secret = false;
+        state_.navigation.focus_key = state_.editor.opener_focus_key;
+        save_profile();
         return;
     }
     if (state_.editor.purpose == "Preset name") { commit_my_preset_name(); return; }
@@ -12212,6 +12285,24 @@ void Simulation::activate() {
         state_.downloads_slow_network = !state_.downloads_slow_network;
         save_profile();
     }
+    else if (action_name == "cycle-proxy-mode") {
+        state_.proxy_mode = state_.proxy_mode == "off" ? "http" : state_.proxy_mode == "http" ? "socks5" : "off";
+        save_profile();
+    }
+    else if (action_name == "toggle-proxy-global") {
+        state_.proxy_global = !state_.proxy_global;
+        save_profile();
+    }
+    else if (action_name == "toggle-github-mirror") {
+        if (state_.proxy_mode == "off") state_.github_mirror = !state_.github_mirror;
+        save_profile();
+    }
+    else if (action_name == "edit-proxy-host") start_editor("Proxy address", state_.proxy_host, false);
+    else if (action_name == "edit-proxy-port") start_editor("Proxy port", state_.proxy_port, false);
+    else if (action_name == "edit-proxy-username") start_editor("Proxy username", state_.proxy_username, false);
+    else if (action_name == "edit-proxy-password") start_editor("Proxy password", state_.proxy_password, true);
+    else if (action_name == "edit-github-mirror-base") start_editor("Mirror address", state_.github_mirror_base, false);
+    else if (action_name == "edit-github-api-base") start_editor("GitHub API address", state_.github_api_base, false);
     else if (action_name == "launch") { state_.session_game_id = state_.navigation.selected_game_id; state_.session = SessionState::Preparing; state_.navigation.route = Route::Session; state_.navigation.focus_key = "session-return"; }
     else if (action_name == "runtime-status") open_modal({"runtime", "Runtime unavailable", "details-play", {"runtime-retry", "cancel"}, 0, false});
     else if (action_name == "return-game") state_.session = SessionState::Running;

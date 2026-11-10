@@ -1,6 +1,7 @@
 #include "steam/backend/ws_client.h"
 
 #include "steam/backend/native_network.h"
+#include "steam/backend/network_proxy.h"
 
 #include <curl/curl.h>
 #include <poll.h>
@@ -46,7 +47,8 @@ bool ValidWebSocketUrl(const std::string& url) {
   return valid;
 }
 
-HttpError MapConnectError(CURLcode code) {
+HttpError MapConnectError(CURLcode code, bool proxy_failed) {
+  if (proxy_failed) return HttpError::kProxyFailed;
   switch (code) {
     case CURLE_OK: return HttpError::kNone;
     case CURLE_OPERATION_TIMEDOUT: return HttpError::kTimeout;
@@ -56,6 +58,11 @@ HttpError MapConnectError(CURLcode code) {
     case CURLE_SSL_CACERT_BADFILE: return HttpError::kTlsVerificationFailed;
     default: return HttpError::kProtocolError;
   }
+}
+
+bool ProxyConnectFailure(CURLcode code) {
+  return code == CURLE_COULDNT_RESOLVE_PROXY || code == CURLE_PROXY || code == CURLE_LOGIN_DENIED ||
+         code == CURLE_COULDNT_CONNECT;
 }
 
 // Aborts a blocking connect when the caller cancels or the deadline passes.
@@ -99,7 +106,6 @@ class WebSocketClient::Impl {
         curl_easy_setopt(easy_, CURLOPT_SSL_VERIFYPEER, 1L) == CURLE_OK &&
         curl_easy_setopt(easy_, CURLOPT_SSL_VERIFYHOST, 2L) == CURLE_OK &&
         curl_easy_setopt(easy_, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2) == CURLE_OK &&
-        curl_easy_setopt(easy_, CURLOPT_PROXY, "") == CURLE_OK &&
         curl_easy_setopt(easy_, CURLOPT_FOLLOWLOCATION, 0L) == CURLE_OK &&
         curl_easy_setopt(easy_, CURLOPT_PROTOCOLS_STR, "wss") == CURLE_OK &&
         curl_easy_setopt(easy_, CURLOPT_NOSIGNAL, 1L) == CURLE_OK &&
@@ -108,6 +114,16 @@ class WebSocketClient::Impl {
       Close();
       return HttpError::kInitializationFailed;
     }
+    const auto bound = BindProxy(easy_, ProxyScope::kExternal, url, cancel);
+    if (bound == ProxyBindResult::kCanceled) {
+      Close();
+      return HttpError::kCanceled;
+    }
+    if (bound == ProxyBindResult::kRejected) {
+      Close();
+      return HttpError::kProxyFailed;
+    }
+    if (bound == ProxyBindResult::kDirect) {
     const auto resolved =
         internal::AttachNativeResolution(easy_, url, timeout_ms, cancel, &resolve_);
     if (resolved != internal::NativeResolveError::kNone) {
@@ -116,6 +132,7 @@ class WebSocketClient::Impl {
       return resolved == internal::NativeResolveError::kTimeout
                  ? HttpError::kTimeout
                  : HttpError::kNameResolutionFailed;
+    }
     }
     if (cancel.load(std::memory_order_acquire)) {
       Close();
@@ -145,7 +162,9 @@ class WebSocketClient::Impl {
       const bool canceled = cancel.load(std::memory_order_acquire);
       Close();
       if (canceled) return HttpError::kCanceled;
-      return code == CURLE_ABORTED_BY_CALLBACK ? HttpError::kTimeout : MapConnectError(code);
+      return code == CURLE_ABORTED_BY_CALLBACK
+                 ? HttpError::kTimeout
+                 : MapConnectError(code, bound == ProxyBindResult::kBound && ProxyConnectFailure(code));
     }
     curl_socket_t socket = CURL_SOCKET_BAD;
     if (curl_easy_getinfo(easy_, CURLINFO_ACTIVESOCKET, &socket) == CURLE_OK) socket_ = socket;
