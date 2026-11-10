@@ -1,10 +1,12 @@
-# Build and test this fork. This workflow does not publish a release.
+# Build and test this fork. A version tag such as v0.11.0b also publishes a GitHub Release.
+# Pull requests and pushes to main do not publish.
 name: Fork build
 
 on:
   pull_request:
   push:
-    branches: [cursor/clean-mirror-rebuild-8f6b]
+    branches: [main]
+    tags: ['v*.*.*b']
 
 permissions:
   contents: read
@@ -67,6 +69,7 @@ jobs:
         env:
           PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ secrets.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
           PLAYDEN_ACCEPT_PS5_CURL_REBUILD: "1"
+          PLAYDEN_DEV_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && 'OFF' || 'ON' }}
         run: |
           set -euo pipefail
           python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else "")'
@@ -90,3 +93,40 @@ jobs:
               raise SystemExit("contentVersion must stay numeric")
           PY
           python3 -c 'import os,pathlib,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); p=pathlib.Path("build/homebrew-ps5/dist/FAKE77031/eboot.bin"); d=p.read_bytes() if p.is_file() else b""; present=bool(v) and v.encode() in d; print("injected-config-present:", "yes" if present else "no"); sys.exit(0 if (present or not v) else 1)'
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+            got=$(tr -d '[:space:]' < build/homebrew-ps5/dist/FAKE77031/playden-version)
+            test "$got" = "$ver"
+            mkdir -p build/release
+            (cd build/homebrew-ps5/dist && zip -r -q "$GITHUB_WORKSPACE/build/release/playden-ps5-${ver}.zip" FAKE77031)
+          fi
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: ps5-package
+          path: build/release/playden-ps5-*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [host-tests, ps5-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ps5-package
+          path: release
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          zipfile="release/playden-ps5-${ver}.zip"
+          test -f "$zipfile"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Playden for PS5 ${ver}" \
+            --notes "Fork build ${ver}. The version is the upstream version with a trailing b. The PS5 content version stays numeric. This is not an official upstream release, and it was not installed on a console." \
+            "$zipfile"
