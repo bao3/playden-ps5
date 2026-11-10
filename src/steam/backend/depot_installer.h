@@ -273,6 +273,7 @@ class DepotInstaller {
                                             const std::atomic<bool>& cancel, std::vector<DepotManifest>* manifests,
                                             InstallMeasure* measure);
   InstallerHooks hooks_;
+  std::string directory_summary_;
  public:
   void SetStats(std::function<void(const char*, const InstallStats&)> stats) { hooks_.stats = std::move(stats); }
   void SetServerList(std::function<void(const std::vector<ContentServer>&, const char*)> listed) {
@@ -286,6 +287,7 @@ class DepotInstaller {
     hooks_.remember_fastest = std::move(remember);
   }
   void SetTuning(DownloadTuning tuning) { tuning_ = tuning; }
+  const std::string& directory_summary() const { return directory_summary_; }
  private:
   DownloadTuning tuning_;
 };

@@ -20,12 +20,15 @@ class CdnDownloadServerSource final : public DownloadServerSource {
     // A separate slot identifies each independently owned transfer client.
     std::function<HttpResponse(std::size_t, const HttpRequest&, const std::atomic<bool>&)> perform;
     std::function<Clock::time_point()> now;
+    std::function<std::uint32_t()> cell_id;
   };
   CdnDownloadServerSource(CmClient& cm, CdnClient& cdn,
                            std::function<std::uint32_t()> newest_installed_app = {});
   CdnDownloadServerSource(CdnClient& cdn, Hooks hooks,
                            std::function<std::uint32_t()> newest_installed_app = {});
   bool List(const std::atomic<bool>& cancel, std::vector<DownloadServerView>* out) override;
+  std::string ListDetail() const override { return cdn_.directory_summary(); }
+  void SetCellSource(std::function<std::uint32_t()> cell) { hooks_.cell_id = std::move(cell); }
   DownloadServerPreparation Prepare(const StoredSession&, const std::atomic<bool>& cancel) override;
   DownloadServerRate Measure(const std::string& id, std::uint64_t byte_budget,
                              const std::atomic<bool>& cancel) override;

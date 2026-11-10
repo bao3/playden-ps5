@@ -569,6 +569,8 @@ InstallRunner::Result SteamInstallRunner::Run(const StoredSession& session, std:
     for (const auto id : outcome.skipped_depots) skipped += (skipped.empty() ? "" : " ") + std::to_string(id);
     log("depots", "skipped", ("borrowed-refused=" + skipped).c_str());
   }
+  if (!installer_.directory_summary().empty())
+    log("directory", "listed", installer_.directory_summary().c_str());
   log("install", InstallErrorName(outcome.error), outcome.detail.c_str());
   result.ok = outcome.error == InstallError::kNone;
   result.canceled = outcome.error == InstallError::kCanceled;

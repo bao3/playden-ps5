@@ -35,6 +35,14 @@ void ListingPolicy() {
     assert(servers[0].plain_http == !mixed);
     assert(servers[0].name == (mixed ? "Fastly" : "http.example"));
   }
+  CdnClient regional([&](const HttpRequest& request, const std::atomic<bool>&) {
+    assert(request.url.find("cell_id=42") != std::string::npos);
+    return Reply(R"({"response":{"servers":[{"type":"CDN","host":"cache5-fra1.steamcontent.com","https_support":"mandatory"}]}})");
+  });
+  CdnDownloadServerSource regional_source(regional, {});
+  regional_source.SetCellSource([] { return 42u; });
+  std::vector<DownloadServerView> regional_servers;
+  assert(regional_source.List(cancel, &regional_servers) && regional_servers.size() == 1);
   // Servers of one provider are told apart by their host; a lone one keeps the provider name.
   CdnClient cdn([&](const HttpRequest&, const std::atomic<bool>&) {
     return Reply(R"({"response":{"servers":[{"type":"CDN","host":"cache5-fra1.steamcontent.com"},)"

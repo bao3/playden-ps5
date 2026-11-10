@@ -40,6 +40,8 @@ class DownloadServerSource {
  public:
   virtual ~DownloadServerSource() = default;
   virtual bool List(const std::atomic<bool>& cancel, std::vector<DownloadServerView>* out) = 0;
+  // Sanitized directory counts from the last List. Empty when the source has none.
+  virtual std::string ListDetail() const { return {}; }
   virtual DownloadServerPreparation Prepare(const StoredSession&, const std::atomic<bool>& cancel) = 0;
   virtual DownloadServerRate Measure(const std::string& id, std::uint64_t byte_budget,
                                      const std::atomic<bool>& cancel) = 0;

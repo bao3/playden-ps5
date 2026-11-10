@@ -112,18 +112,26 @@ CdnError CdnClient::Get(const std::string& url, std::size_t max_bytes, std::uint
 
 CdnError CdnClient::Servers(std::uint32_t cell_id, const std::atomic<bool>& cancel,
                             std::vector<ContentServer>* out) {
+  const auto summarize = [&](std::size_t listed, std::size_t https, std::size_t plain, const char* kept) {
+    directory_summary_ = "cell=" + std::to_string(cell_id) + " listed=" + std::to_string(listed) +
+                         " https=" + std::to_string(https) + " plain=" + std::to_string(plain) + " kept=" + kept;
+  };
   std::vector<std::uint8_t> body;
   const auto error = Get(
       "https://api.steampowered.com/IContentServerDirectoryService/GetServersForSteamPipe/v1/?cell_id=" +
           std::to_string(cell_id) + "&format=json",
       kMaxServerListDownloadBytes, 15'000, cancel, &body);
-  if (error != CdnError::kNone) return error;
+  if (error != CdnError::kNone) {
+    summarize(0, 0, 0, "none");
+    return error;
+  }
   const std::string_view text(body.empty() ? "" : reinterpret_cast<const char*>(body.data()), body.size());
   const auto root = json::Parse(text, json::Limits{512 * 1024, 8, 8192, 4096});
   const auto* response = root ? root->Find("response") : nullptr;
   const auto* servers = response ? response->Find("servers") : nullptr;
   if (!servers || !servers->is_array()) {
     last_failure_ = "servers=malformed";
+    summarize(0, 0, 0, "none");
     return CdnError::kProtocol;
   }
   std::vector<ContentServer> usable, plain;
@@ -150,12 +158,20 @@ CdnError CdnClient::Servers(std::uint32_t cell_id, const std::atomic<bool>& canc
     }
     (entry.https ? usable : plain).push_back(std::move(entry));
   }
+  const auto https_count = usable.size();
+  const auto plain_count = plain.size();
   // Plain HTTP only when the directory offers nothing better.
-  if (usable.empty()) usable = std::move(plain);
+  const char* kept = "https";
+  if (usable.empty()) {
+    usable = std::move(plain);
+    kept = "plain";
+  }
   if (usable.empty()) {
     last_failure_ = "servers=" + std::to_string(listed) + " usable=0";
+    summarize(listed, https_count, plain_count, "none");
     return CdnError::kProtocol;
   }
+  summarize(listed, https_count, plain_count, kept);
   std::stable_sort(usable.begin(), usable.end(),
                    [](const ContentServer& left, const ContentServer& right) { return left.load < right.load; });
   *out = std::move(usable);

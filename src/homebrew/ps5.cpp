@@ -378,6 +378,11 @@ int main() {
         }, &session_vault);
         // Off: a session.v1 left from before is deleted unread.
         if (!stay_signed_in) (void)sessions.Clear();
+        playden::steam::SetLoggedOnCellHandler(*steam_cm, [&sessions, log_root](std::uint32_t cell) {
+            if (playden::steam::PersistLoggedOnCell(sessions, cell) == playden::steam::CellPersist::kFailed)
+                playden::app::AppendLogLine(log_root, "steam-cm.log",
+                                            "cell_persist=failed cell=" + std::to_string(cell));
+        });
         playden::steam::LibraryClient owned_library(paths.trust_store);
         playden::LocalSessionRepository library_sessions(user_root, {}, &session_vault);
         playden::Storage library_storage(user_root);
@@ -922,6 +927,12 @@ int main() {
             for (const auto& game : snapshot.installed)
                 if (game.available && game.id.steam_app() && (!newest || game.finished_at > newest->finished_at)) newest = &game;
             return newest ? *newest->id.steam_app() : 0u;
+        });
+        servers_source.SetCellSource([&servers_cm, &servers_sessions] {
+            std::optional<std::uint32_t> stored;
+            const auto loaded = servers_sessions.Load();
+            if (loaded.ok() && loaded.value()) stored = loaded.value()->cell_id;
+            return playden::steam::DirectoryCell(servers_cm.LoggedOnCell(), stored);
         });
         playden::steam::DownloadServerService servers(servers_source, servers_sessions);
         servers.SetLog([](std::uint32_t app, const char* step, const char* category, const char* detail) {

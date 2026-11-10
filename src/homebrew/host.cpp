@@ -578,6 +578,11 @@ int main(int argc, char** argv) {
             }, session_vault.get());
         // Off: a session.v1 left from before is deleted unread.
         if (!stay_signed_in) (void)sessions->Clear();
+        playden::steam::SetLoggedOnCellHandler(*steam_cm, [repo = sessions.get(), log_directory](std::uint32_t cell) {
+            if (playden::steam::PersistLoggedOnCell(*repo, cell) == playden::steam::CellPersist::kFailed)
+                playden::app::AppendLogLine(log_directory, "steam-cm.log",
+                                            "cell_persist=failed cell=" + std::to_string(cell));
+        });
         owned_library = std::make_unique<playden::steam::LibraryClient>(PLAYDEN_HOMEBREW_CA_BUNDLE);
         library_sessions = std::make_unique<playden::LocalSessionRepository>(options->data_directory.string(), playden::LocalSessionRepository::DiagnosticReport{}, session_vault.get());
         library_storage = std::make_unique<playden::Storage>(options->data_directory.string());
@@ -712,6 +717,12 @@ int main(int argc, char** argv) {
             for (const auto& game : snapshot.installed)
                 if (game.available && game.id.steam_app() && (!newest || game.finished_at > newest->finished_at)) newest = &game;
             return newest ? *newest->id.steam_app() : 0u;
+        });
+        servers_source->SetCellSource([cm = servers_cm.get(), repo = servers_sessions.get()] {
+            std::optional<std::uint32_t> stored;
+            const auto loaded = repo->Load();
+            if (loaded.ok() && loaded.value()) stored = loaded.value()->cell_id;
+            return playden::steam::DirectoryCell(cm->LoggedOnCell(), stored);
         });
         servers = std::make_unique<playden::steam::DownloadServerService>(*servers_source, *servers_sessions);
         servers->SetLog([log_directory](std::uint32_t app, const char* step, const char* category, const char* detail) {

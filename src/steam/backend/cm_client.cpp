@@ -364,6 +364,11 @@ class CmClient::Session {
     return logon_ ? std::optional<std::int32_t>(logon_->eresult) : std::nullopt;
   }
   std::optional<std::int32_t> logged_off_eresult() const { return logged_off_eresult_; }
+  // Present only after a logon Steam accepted. A missing field is 0, the same default the decoder uses.
+  std::optional<std::uint32_t> cell_id() const {
+    if (!logon_ || logon_->eresult != cm::kEResultOk) return std::nullopt;
+    return logon_->cell_id;
+  }
   bool logged_off() const { return logged_off_; }
 
   CmError Send(std::uint32_t emsg, const std::vector<std::uint8_t>& body,
@@ -677,6 +682,7 @@ class CmSharedSession {
  private:
   friend class CmClient;
   friend std::uint64_t CmLicenseChanges(const CmSharedSession& shared);
+  friend void SetLoggedOnCellHandler(CmSharedSession& shared, std::function<void(std::uint32_t)> handler);
   // Keeps an idle session alive: answers the server and sends heartbeats on its interval. A call
   // waiting for the session never waits more than one short turn.
   void Pump() {
@@ -722,6 +728,7 @@ class CmSharedSession {
     session_.reset();
     transport_.reset();
     key_.clear();
+    cell_.reset();
   }
 
   std::mutex mutex_;  // held by a call for its duration, and by the pump for one short turn
@@ -732,6 +739,8 @@ class CmSharedSession {
   std::uint64_t licensed_account_ = 0;
   std::set<std::uint32_t> licensed_packages_;
   std::atomic<std::uint64_t> license_changes_{0};
+  std::optional<std::uint32_t> cell_;
+  std::function<void(std::uint32_t)> cell_handler_;
   std::mutex stop_mutex_;
   std::condition_variable stop_wake_;
   bool stop_ = false;
@@ -742,6 +751,45 @@ std::shared_ptr<CmSharedSession> MakeCmSharedSession() { return std::make_shared
 
 std::uint64_t CmLicenseChanges(const CmSharedSession& shared) {
   return shared.license_changes_.load(std::memory_order_acquire);
+}
+
+void SetLoggedOnCellHandler(CmSharedSession& shared, std::function<void(std::uint32_t)> handler) {
+  std::lock_guard<std::mutex> lock(shared.mutex_);
+  shared.cell_handler_ = std::move(handler);
+}
+
+CellPersist PersistLoggedOnCell(SessionRepository& repository, std::uint32_t cell) {
+  const auto loaded = repository.Load();
+  if (!loaded.ok() || !loaded.value()) return CellPersist::kFailed;
+  auto session = *loaded.value();
+  if (!ApplyLoggedOnCell(session, cell)) return CellPersist::kUnchanged;
+  if (!repository.Save(session).ok()) return CellPersist::kFailed;
+  return CellPersist::kSaved;
+}
+
+void CmClient::NoteCell(std::uint32_t cell) {
+  std::function<void(std::uint32_t)> handler;
+  if (shared_) {
+    if (shared_->cell_ && *shared_->cell_ == cell) return;
+    shared_->cell_ = cell;
+    handler = shared_->cell_handler_;
+  } else {
+    std::lock_guard<std::mutex> lock(cell_mu_);
+    if (own_cell_ && *own_cell_ == cell) return;
+    own_cell_ = cell;
+    handler = cell_handler_;
+  }
+  if (handler) handler(cell);
+}
+
+std::optional<std::uint32_t> CmClient::LoggedOnCell() const {
+  if (shared_) {
+    std::lock_guard<std::mutex> lock(shared_->mutex_);
+    if (!shared_->session_ || !shared_->session_->usable()) return std::nullopt;
+    return shared_->cell_;
+  }
+  std::lock_guard<std::mutex> lock(cell_mu_);
+  return own_cell_;
 }
 
 void CmClient::EndSession(Session* session, MessageTransport* transport,
@@ -919,7 +967,9 @@ CmError CmClient::Open(const StoredSession& stored, const std::atomic<bool>& can
   const auto logon = (*opened)->Logon(stored, *device_);
   if (logon == CmError::kNone) {
     NoteLogon();
-    Log("step=logon result=ok " + fingerprint);
+    const auto cell = (*opened)->cell_id();
+    if (cell) NoteCell(*cell);
+    Log("step=logon result=ok cell=" + std::to_string(cell.value_or(0)) + " " + fingerprint);
   } else if (logon != CmError::kCanceled) {
     const auto eresult = (*opened)->logon_eresult();
     const auto off = (*opened)->logged_off_eresult();

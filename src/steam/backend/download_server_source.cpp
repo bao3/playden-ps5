@@ -45,7 +45,8 @@ std::string CdnDownloadServerSource::DisplayName(const std::string& id) const { 
 std::string CdnDownloadServerSource::LogLabel(const std::string& id) const { return CdnServerLabel(id); }
 bool CdnDownloadServerSource::List(const std::atomic<bool>& cancel, std::vector<DownloadServerView>* out) {
   std::vector<ContentServer> listed;
-  if (cdn_.Servers(0, cancel, &listed) != CdnError::kNone || cancel) return false;
+  const auto cell = hooks_.cell_id ? hooks_.cell_id() : 0u;
+  if (cdn_.Servers(cell, cancel, &listed) != CdnError::kNone || cancel) return false;
   servers_ = std::move(listed);
   out->clear();
   for (const auto& server : servers_) out->push_back({server.host, DisplayName(server.host), !server.https});

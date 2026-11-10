@@ -196,6 +196,25 @@ std::shared_ptr<CmSharedSession> MakeCmSharedSession();
 // starts at 0, and a new account's first list never counts. Safe from any thread.
 std::uint64_t CmLicenseChanges(const CmSharedSession& shared);
 
+// The directory cell: a live successful logon wins, including cell 0. Otherwise the saved
+// session's cell, or 0 when the session never learned one.
+inline std::uint32_t DirectoryCell(std::optional<std::uint32_t> live, std::optional<std::uint32_t> stored) {
+  return live ? *live : stored.value_or(0);
+}
+// True when `cell` is not already the session's saved cell. Does not touch tokens.
+inline bool ApplyLoggedOnCell(StoredSession& session, std::uint32_t cell) {
+  if (session.cell_id && *session.cell_id == cell) return false;
+  session.cell_id = cell;
+  return true;
+}
+enum class CellPersist { kUnchanged, kSaved, kFailed };
+// Loads the saved session, applies a cell learned from a successful logon, and saves only when
+// it changed. No session, or a failed load or save, writes nothing.
+CellPersist PersistLoggedOnCell(SessionRepository& repository, std::uint32_t cell);
+// The handler runs on the CM call's thread while that call holds the shared session. It must not
+// call back into a CM client. It is not called for a refused logon.
+void SetLoggedOnCellHandler(CmSharedSession& shared, std::function<void(std::uint32_t)> handler);
+
 // Without a shared session, a CM session per call: directory, connect (first four endpoints), hello,
 // logon with the stored refresh token, the pushed license list, then package PICS in batches of 50.
 // All output is error categories and app dates; no endpoint, address, token or account identity is
@@ -210,6 +229,10 @@ class CmClient final : public AcquisitionSource {
   void SetOwner(std::string owner) { owner_ = std::move(owner); }
   // Runs every call on `shared` instead of a session of its own. Set before the first call.
   void SetSharedSession(std::shared_ptr<CmSharedSession> shared) { shared_ = std::move(shared); }
+  // The cell from the logged-on shared session, or from the last successful logon of a client
+  // that does not share one. Empty after the shared session is dropped or before a success.
+  // Zero is a real value.
+  std::optional<std::uint32_t> LoggedOnCell() const;
 
   AcquisitionResult FetchAcquisitionDates(const StoredSession& session,
                                           const std::atomic<bool>& cancel) override;
@@ -280,7 +303,11 @@ class CmClient final : public AcquisitionSource {
   static void EndSession(Session* session, MessageTransport* transport,
                          const std::function<void(const std::string&)>& log);
   void Log(const std::string& line) const;
+  void NoteCell(std::uint32_t cell);
   CmClientHooks hooks_;
+  std::optional<std::uint32_t> own_cell_;
+  std::function<void(std::uint32_t)> cell_handler_;
+  mutable std::mutex cell_mu_;
   std::string owner_ = "cm";
   std::shared_ptr<CmSharedSession> shared_;
   std::string ca_bundle_;

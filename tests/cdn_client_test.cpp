@@ -101,6 +101,7 @@ void ServersFilterAndSortByLoad() {
   assert(servers[1].vhost == "vb.example.invalid" && servers[1].https);
   assert(urls[0].find("GetServersForSteamPipe/v1/?cell_id=42") != std::string::npos);
   assert(urls[0].rfind("https://", 0) == 0);
+  assert(client.directory_summary() == "cell=42 listed=5 https=2 plain=1 kept=https");
 }
 
 void PlainHttpServersWhenNoHttpsIsListed() {
@@ -119,6 +120,7 @@ void PlainHttpServersWhenNoHttpsIsListed() {
   assert(servers.size() == 2);
   assert(servers[0].vhost == "va.example.invalid" && !servers[0].https);
   assert(servers[1].host == "b.example.invalid" && !servers[1].https);
+  assert(client.directory_summary() == "cell=7 listed=3 https=0 plain=2 kept=plain");
 }
 
 void EmptyServerListSaysWhy() {

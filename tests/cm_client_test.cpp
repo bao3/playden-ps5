@@ -45,10 +45,12 @@ std::vector<std::uint8_t> ServerFrame(std::uint32_t emsg, const std::vector<std:
   return cm::EncodeFrame(emsg, header, body);
 }
 
-std::vector<std::uint8_t> LogonResponseBody(std::int32_t eresult, std::int32_t heartbeat) {
+std::vector<std::uint8_t> LogonResponseBody(std::int32_t eresult, std::int32_t heartbeat,
+                                            std::optional<std::uint32_t> cell = std::nullopt) {
   proto::Writer body;
   body.AddVarint(1, static_cast<std::uint32_t>(eresult));
   body.AddVarint(3, static_cast<std::uint32_t>(heartbeat));
+  if (cell) body.AddVarint(7, *cell);
   return body.bytes();
 }
 
@@ -198,6 +200,88 @@ void AcquisitionDatesFromGzipMultiLicensesAndMultipartPics() {
   assert(script->sent[2].header.steam_id == kAccountSteamId);
   assert(script->sent[2].header.session_id == 77);
   assert(script->sent[2].header.jobid_source == 1u);
+}
+
+CmError Ping(CmClient& client, const std::atomic<bool>& cancel);
+
+class MemorySessions final : public SessionRepository {
+ public:
+  Result<std::optional<StoredSession>> Load() const override {
+    return Result<std::optional<StoredSession>>::Success(session_);
+  }
+  Result<void> Save(const StoredSession& session) const override {
+    session_ = session;
+    ++saves;
+    return Result<void>::Success();
+  }
+  Result<void> Clear() const override {
+    session_.reset();
+    return Result<void>::Success();
+  }
+  mutable std::optional<StoredSession> session_;
+  mutable int saves = 0;
+};
+
+void CellChoicePrefersLiveValueIncludingZero() {
+  assert(DirectoryCell(std::nullopt, std::nullopt) == 0u);
+  assert(DirectoryCell(std::nullopt, 0u) == 0u);
+  assert(DirectoryCell(std::nullopt, 7u) == 7u);
+  assert(DirectoryCell(0u, 7u) == 0u);
+  assert(DirectoryCell(42u, std::nullopt) == 42u);
+  StoredSession session;
+  assert(ApplyLoggedOnCell(session, 42u) && session.cell_id == 42u);
+  assert(!ApplyLoggedOnCell(session, 42u));
+  assert(ApplyLoggedOnCell(session, 0u) && session.cell_id == 0u);
+}
+
+void PersistLoggedOnCellUpdatesAndSkipsEqualValues() {
+  MemorySessions repository;
+  assert(PersistLoggedOnCell(repository, 42u) == CellPersist::kFailed && repository.saves == 0);
+  repository.session_ = Session();
+  assert(!repository.session_->cell_id);
+  assert(PersistLoggedOnCell(repository, 42u) == CellPersist::kSaved && repository.saves == 1);
+  assert(repository.session_->cell_id == 42u);
+  assert(PersistLoggedOnCell(repository, 42u) == CellPersist::kUnchanged && repository.saves == 1);
+  assert(PersistLoggedOnCell(repository, 0u) == CellPersist::kSaved && repository.session_->cell_id == 0u);
+}
+
+void SuccessfulLogonPublishesCellAndFailureDoesNot() {
+  auto script = std::make_shared<Script>();
+  script->on_logon = {ServerFrame(cm::kEMsgClientLogOnResponse, LogonResponseBody(1, 9, 42u))};
+  script->on_service = {ServerFrame(cm::kEMsgServiceMethodResponse, {}, std::nullopt, 1)};
+  auto shared = MakeCmSharedSession();
+  auto client = MakeClient(script);
+  client.SetSharedSession(shared);
+  std::vector<std::uint32_t> learned;
+  SetLoggedOnCellHandler(*shared, [&](std::uint32_t cell) { learned.push_back(cell); });
+  std::atomic<bool> cancel{false};
+  assert(Ping(client, cancel) == CmError::kNone);
+  assert(learned.size() == 1 && learned[0] == 42u);
+  assert(client.LoggedOnCell() == 42u);
+  auto other = MakeClient(script);
+  other.SetSharedSession(shared);
+  assert(other.LoggedOnCell() == 42u);
+
+  script->on_logon = {ServerFrame(cm::kEMsgClientLogOnResponse,
+                                  LogonResponseBody(cm::kEResultInvalidPassword, 9, 99u))};
+  auto rejected = Session();
+  rejected.refresh_token = "synthetic.rejected.token";
+  assert(client.WithServiceSession(rejected, 3000, cancel,
+                                   [](const CmClient::ServiceCall&, std::uint64_t) {
+                                     return CmError::kNone;
+                                   }) == CmError::kRejected);
+  assert(learned.size() == 1);
+  assert(!client.LoggedOnCell());
+
+  script->on_logon = {ServerFrame(cm::kEMsgClientLogOnResponse, LogonResponseBody(1, 9, 0u))};
+  auto replaced = Session();
+  replaced.refresh_token = "synthetic.replaced.token";
+  assert(client.WithServiceSession(replaced, 3000, cancel, [](const CmClient::ServiceCall& call, std::uint64_t) {
+           std::vector<std::uint8_t> reply;
+           return call("Cloud.Ping#1", {}, &reply, nullptr);
+         }) == CmError::kNone);
+  assert(learned.size() == 2 && learned[1] == 0u);
+  assert(client.LoggedOnCell() == 0u);
 }
 
 void RejectedLogonIsReportedWithoutDates() {
@@ -1355,6 +1439,11 @@ int main(int argc, char** argv) {
   BorrowedPackagesPicsSkipsAreLogged();
   ResetCmBackoff();
   FamilyLicenseLinesAreCappedAndOnlyOnChange();
+  ResetCmBackoff();
+  CellChoicePrefersLiveValueIncludingZero();
+  PersistLoggedOnCellUpdatesAndSkipsEqualValues();
+  ResetCmBackoff();
+  SuccessfulLogonPublishesCellAndFailureDoesNot();
   ResetCmBackoff();
   RejectedLogonIsReportedWithoutDates();
   ResetCmBackoff();

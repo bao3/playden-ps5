@@ -631,10 +631,12 @@ DepotInstaller::DepotInstaller(CmClient& cm, CdnClient& cdn) {
   };
   // Which check a manifest that arrived failed, for the install log; empty after a network failure.
   auto manifest_problem = std::make_shared<std::string>();
-  hooks_.servers = [&cdn, manifest_problem](std::uint32_t cell, const std::atomic<bool>& cancel,
-                                            std::vector<ContentServer>* out) {
+  hooks_.servers = [this, &cm, &cdn, manifest_problem](std::uint32_t cell, const std::atomic<bool>& cancel,
+                                                       std::vector<ContentServer>* out) {
     manifest_problem->clear();  // a manifest problem from an earlier run must not hide why this list failed
-    return cdn.Servers(cell, cancel, out);
+    const auto error = cdn.Servers(DirectoryCell(cm.LoggedOnCell(), cell), cancel, out);
+    directory_summary_ = cdn.directory_summary();
+    return error;
   };
   static_assert(CdnClient::kMaxManifestDownloadBytes <= kMaxManifestBytes && kMaxManifestBytes <= kMaxInflateRawBytes,
                 "a manifest the CDN client accepts must unzip");

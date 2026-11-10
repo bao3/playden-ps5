@@ -58,6 +58,9 @@ class CdnClient {
   // The last failure as "http=<status>" or "transport=<category>", for sanitized logs.
   const CdnStats& stats() const { return stats_; }
   const std::string& last_failure() const { return last_failure_; }
+  // Counts only: cell, how many directory rows came back, how many were HTTPS or plain, and which
+  // set was kept. No host names. A directory response is not a chunk download.
+  const std::string& directory_summary() const { return directory_summary_; }
   const std::string& ca_bundle() const { return ca_bundle_; }
 
  private:
@@ -68,6 +71,7 @@ class CdnClient {
   Perform perform_;
   std::unique_ptr<HttpClient> http_;
   std::string last_failure_;
+  std::string directory_summary_;
   CdnStats stats_;
 };
 

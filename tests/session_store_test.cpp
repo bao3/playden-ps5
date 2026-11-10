@@ -63,6 +63,16 @@ void RoundTripAndPermissions() {
   Check(replaced.ok() && replaced.value() && !replaced.value()->cell_id &&
             replaced.value()->access_token == "replacement-access",
         "replacement and absent optional cell round trip");
+  auto learned = without_cell;
+  learned.cell_id = 7u;
+  Check(store.Save(learned).ok(), "learned cell saves over an absent cell");
+  const auto with_cell = store.Load();
+  Check(with_cell.ok() && with_cell.value() && with_cell.value()->cell_id == 7u, "learned cell loads");
+  learned.cell_id = 0u;
+  Check(store.Save(learned).ok(), "cell zero replaces a previous cell");
+  const auto cleared_cell = store.Load();
+  Check(cleared_cell.ok() && cleared_cell.value() && cleared_cell.value()->cell_id == 0u,
+        "cell zero round trips and does not look absent");
 }
 
 void MissingAndClear() {

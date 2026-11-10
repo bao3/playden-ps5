@@ -101,6 +101,8 @@ void DownloadServerService::Run() {
       std::vector<DownloadServerView> listed;
       if (!cancel_ && source_.List(cancel_, &listed) && !listed.empty()) state.servers = std::move(listed);
       else { state.servers.clear(); failed = true; }
+      const auto detail = source_.ListDetail();
+      if (log_ && !detail.empty()) log_(0, "server-list", failed ? "failed" : "listed", detail.c_str());
       state.phase = failed ? DownloadServerSnapshot::Phase::kListFailed : DownloadServerSnapshot::Phase::kListed;
     }
     if (request == Request::kTest && !failed && !cancel_) {
