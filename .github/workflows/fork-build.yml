@@ -21,13 +21,13 @@ jobs:
           submodules: recursive
       - name: Mask the injected mirror address
         env:
-          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ secrets.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
         run: python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else ""); print("mirror-address-configured:", "yes" if v else "no")'
       - name: Install the host toolchain
         run: brew install cmake ninja pkgconf sdl2-compat
       - name: Build and run the selected tests
         env:
-          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ secrets.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
         run: |
           set -euo pipefail
           python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else "")'
@@ -50,7 +50,7 @@ jobs:
           submodules: recursive
       - name: Mask the injected mirror address
         env:
-          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ secrets.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
         run: python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else ""); print("mirror-address-configured:", "yes" if v else "no")'
       - name: Install the PS5 cross toolchain
         run: |
@@ -65,7 +65,7 @@ jobs:
           test -x "$bindir/ld.lld"
       - name: Build the PS5 package
         env:
-          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ secrets.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
           PLAYDEN_ACCEPT_PS5_CURL_REBUILD: "1"
         run: |
           set -euo pipefail
