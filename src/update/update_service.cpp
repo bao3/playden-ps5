@@ -1,10 +1,12 @@
 #include "update/update_service.h"
 
+#include <mbedtls/sha256.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <utility>
@@ -32,6 +34,51 @@ void* RunJob(void* opaque) {
   std::unique_ptr<std::function<void()>> work(static_cast<std::function<void()>*>(opaque));
   (*work)();
   return nullptr;
+}
+
+std::optional<std::string> HashBytes(const UpdateConfig& config, std::string_view bytes) {
+  if (config.hash_bytes) return config.hash_bytes(bytes);
+  std::array<unsigned char, 32> digest{};
+  if (mbedtls_sha256(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(), digest.data(), 0) != 0)
+    return std::nullopt;
+  constexpr char hex[] = "0123456789abcdef";
+  std::string result(64, '0');
+  for (std::size_t i = 0; i < digest.size(); ++i) {
+    result[2 * i] = hex[digest[i] >> 4];
+    result[2 * i + 1] = hex[digest[i] & 15];
+  }
+  return result;
+}
+
+std::optional<std::string> OwnReleasePrefix(const std::string& latest_release_url) {
+  constexpr std::string_view marker = "https://api.github.com/repos/";
+  if (latest_release_url.compare(0, marker.size(), marker) != 0) return std::nullopt;
+  const std::string rest = latest_release_url.substr(marker.size());
+  const auto slash = rest.find('/');
+  const auto slash2 = slash == std::string::npos ? std::string::npos : rest.find('/', slash + 1);
+  if (slash == std::string::npos || slash == 0 || slash2 == std::string::npos || slash2 == slash + 1) return std::nullopt;
+  const std::string owner = rest.substr(0, slash);
+  const std::string repo = rest.substr(slash + 1, slash2 - slash - 1);
+  if (owner.find('.') != std::string::npos || repo.find('.') != std::string::npos) return std::nullopt;
+  return "https://github.com/" + owner + "/" + repo + "/releases/download/";
+}
+
+bool OwnDownload(const std::string& url, const std::string& prefix) {
+  return url.rfind(prefix, 0) == 0 && url.find("..") == std::string::npos;
+}
+
+const char* GithubFetchMessage(const std::string& error, const char* fallback) {
+  if (error.find("GitHub rate limit") != std::string::npos)
+    return "GitHub's rate limit stopped the update check. Try again later.";
+  if (error.find("did not return JSON") != std::string::npos || error.find("web page") != std::string::npos)
+    return "The update check did not return release information.";
+  return fallback;
+}
+
+bool DigestMatches(const UpdateConfig& config, std::string_view bytes, const std::string& expected) {
+  if (!IsSha256(expected)) return false;
+  const auto actual = HashBytes(config, bytes);
+  return actual && *actual == expected;
 }
 
 std::string Quote(const std::string& text) {
@@ -556,8 +603,10 @@ void UpdateService::Check(bool user_asked) {
 
 void UpdateService::Install() {
   Run([this] {
-    // A track change can arrive while a download is being cancelled or a check is queued.
-    if (release_ && (release_->prerelease || release_->version.beta) && !include_betas_.load()) {
+    // A stable build that opted out of betas must not install one already selected. A beta build
+    // stays on that channel with Beta updates off, the same rule DoCheck uses to find the release.
+    if (release_ && (release_->prerelease || release_->version.beta) && !include_betas_.load() &&
+        config_.current.beta == 0) {
       DoCheck(false);
       return;
     }
@@ -589,18 +638,20 @@ void UpdateService::DoCheck(bool user_asked) {
     return std::nullopt;
   };
   if (local) Log("reading the release from " + config_.local_release_dir);
-  const bool include_betas = include_betas_.load();
+  // A beta build stays on that channel: GitHub's /releases/latest omits prereleases, and this fork
+  // publishes those. The saved Beta updates switch is left as it is. A stable build still uses it.
+  const bool follow_prereleases = include_betas_.load() || config_.current.beta != 0;
   std::optional<Release> release;
   std::optional<std::vector<Release>> releases;  // every release, when read: betas, or a kit zip left out
-  if (include_betas) {
+  if (follow_prereleases) {
     releases = FetchReleases(&error);
-    if (!releases) return Fail("Playden could not read the releases on GitHub.", error);
+    if (!releases) return Fail(GithubFetchMessage(error, "Playden could not read the releases on GitHub."), error);
     for (const auto& candidate : *releases)
       if (!candidate.draft && (!release || release->version < candidate.version)) release = candidate;
   } else {
     const auto body = local ? read_local("release.json")
-                            : FetchSmall(config_.latest_release_url, 2 << 20, options, "application/vnd.github+json", &error);
-    if (!body) return Fail("Playden could not reach GitHub to look for updates.", error);
+                            : FetchSmall(config_.latest_release_url, 2 << 20, options, "application/vnd.github+json", &error, false);
+    if (!body) return Fail(GithubFetchMessage(error, "Playden could not reach GitHub to look for updates."), error);
     release = ParseRelease(*body, &error);
     if (!release) return Fail("The latest release on GitHub could not be read.", error);
     if (release->draft || release->prerelease || release->version.beta) release.reset();
@@ -618,9 +669,15 @@ void UpdateService::DoCheck(bool user_asked) {
   }
   const auto* asset = release->Find(kUpdateManifestAsset);
   if (!asset) return Fail("Release " + release->tag + " has no update information. Install it by hand.", "no asset");
+  const auto origin = OwnReleasePrefix(config_.latest_release_url);
+  if (!origin) return Fail("Playden's update source is not set.", "release url");
+  if (!local && !OwnDownload(asset->url, *origin))
+    return Fail("This update is not published with this Playden.", "download url");
   const auto manifest_text = local ? read_local(kUpdateManifestAsset)
-                                   : FetchSmall(asset->url, 256 << 10, options, "application/octet-stream", &error);
-  if (!manifest_text) return Fail("Playden could not read the update information.", error);
+                                   : FetchSmall(asset->url, 256 << 10, options, "application/octet-stream", &error, true);
+  if (manifest_text && !local && IsSha256(asset->sha256) && !DigestMatches(config_, *manifest_text, asset->sha256))
+    return Fail("The update information did not match its checksum.", "manifest digest");
+  if (!manifest_text) return Fail(GithubFetchMessage(error, "Playden could not read the update information."), error);
   const auto manifest = ParseUpdateManifest(*manifest_text, &error);
   if (!manifest) return Fail("The update information of " + release->tag + " is not valid.", error);
   if (manifest->app_version != release->version || manifest->title_id != config_.title_id)
@@ -650,6 +707,8 @@ void UpdateService::DoCheck(bool user_asked) {
   if (!app || (kit_needed && !kit)) return Fail("Release " + release->tag + " is missing a download.", "asset");
   if (app->sha256.empty() || (kit_needed && kit->sha256.empty()))
     return Fail("Release " + release->tag + " has no checksums. Install it by hand.", "digest");
+  if (!local && (!OwnDownload(app->url, *origin) || (kit_needed && !OwnDownload(kit->url, *origin))))
+    return Fail("This update is not published with this Playden.", "download url");
   release_ = *release;
   manifest_ = *manifest;
   if (kit_needed) kit_zip_ = *kit;
@@ -831,7 +890,7 @@ std::optional<std::vector<Release>> UpdateService::FetchReleases(std::string* er
   if (url.size() > 7 && url.compare(url.size() - 7, 7, "/latest") == 0) url.erase(url.size() - 7);
   auto options = Downloads("");
   options.max_attempts = 2;
-  const auto body = FetchSmall(url + "?per_page=100", 4 << 20, options, "application/vnd.github+json", error);
+  const auto body = FetchSmall(url + "?per_page=100", 4 << 20, options, "application/vnd.github+json", error, false);
   if (!body) return std::nullopt;
   return ParseReleases(*body, error);
 }
@@ -871,7 +930,7 @@ void UpdateService::DoCheckKit() {
   };
   std::string error;
   const auto releases = FetchReleases(&error);
-  if (!releases) return FailKit("Playden could not reach GitHub to download its runtime kit.", error);
+  if (!releases) return FailKit(GithubFetchMessage(error, "Playden could not reach GitHub to download its runtime kit."), error);
   // The running version's release names its kit. A nightly has no release: its base, or the newest release
   // before it, stands in, and is used only if it names the same kit (checked below).
   const Release* own = nullptr;
@@ -890,13 +949,15 @@ void UpdateService::DoCheckKit() {
   const bool local = !config_.local_release_dir.empty() && Exists(config_.local_release_dir + "/" + kUpdateManifestAsset);
   std::optional<std::string> manifest_text;
   if (!local) {
-    manifest_text = FetchSmall(manifest_asset->url, 256 << 10, options, "application/octet-stream", &error);
+    manifest_text = FetchSmall(manifest_asset->url, 256 << 10, options, "application/octet-stream", &error, true);
+    if (manifest_text && IsSha256(manifest_asset->sha256) && !DigestMatches(config_, *manifest_text, manifest_asset->sha256))
+      return FailKit("The runtime kit information did not match its checksum.", "manifest digest");
   } else if (std::string text; ReadSmallFile(config_.local_release_dir + "/" + kUpdateManifestAsset, &text, 256 << 10)) {
     manifest_text = std::move(text);
   } else {
     error = std::string("cannot read ") + kUpdateManifestAsset;
   }
-  if (!manifest_text) return FailKit("Playden could not read the runtime kit information.", error);
+  if (!manifest_text) return FailKit(GithubFetchMessage(error, "Playden could not read the runtime kit information."), error);
   const auto manifest = ParseUpdateManifest(*manifest_text, &error);
   if (!manifest) return FailKit("The runtime kit information of " + own->tag + " is not valid.", error);
   if (manifest->kit.kit_id != config_.kit_id || manifest->kit.manifest_sha256 != config_.kit_manifest_sha256)
@@ -921,6 +982,9 @@ void UpdateService::DoCheckKit() {
     if ((zip = release.Find(manifest->kit.asset))) source = &release;
   }
   if (!zip) return unavailable("no release has " + manifest->kit.asset);
+  const auto origin = OwnReleasePrefix(config_.latest_release_url);
+  if (!origin || !OwnDownload(zip->url, *origin))
+    return FailKit("This runtime kit is not published with this Playden.", "download url");
   if (zip->sha256.empty()) return FailKit("The runtime kit on GitHub has no checksum. Install it by hand.", source->tag);
   const bool staged = !ReadyKit(manifest->kit).empty();
   kit_asset_ = *zip;

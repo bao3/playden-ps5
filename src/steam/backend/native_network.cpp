@@ -214,4 +214,62 @@ NativeResolveError AttachNativeResolution(CURL* easy, const std::string& url,
 #endif
 }
 
+NativeResolveError ResolveProxyAddress(const std::string& host, std::uint32_t timeout_ms,
+                                       const std::atomic<bool>& cancel, std::string* address) {
+  if (!address || host.empty() || host.size() > 253) return NativeResolveError::kFailed;
+  if (cancel.load(std::memory_order_acquire)) return NativeResolveError::kCanceled;
+#if defined(PLAYDEN_PLATFORM_PS5) && PLAYDEN_PLATFORM_PS5
+  in_addr literal{};
+  if (inet_pton(AF_INET, host.c_str(), &literal) == 1) {
+    if (host == "0.0.0.0") return NativeResolveError::kUnusableAddress;
+    *address = host;
+    return NativeResolveError::kNone;
+  }
+  if (timeout_ms == 0) return NativeResolveError::kFailed;
+  int pool = sceNetPoolCreate("playden-proxy-resolver", 0x4000, 0);
+  if (pool < 0) return NativeResolveError::kFailed;
+  int resolver = sceNetResolverCreate("playden-proxy-resolver", pool, 0);
+  if (resolver < 0) {
+    sceNetPoolDestroy(pool);
+    return NativeResolveError::kFailed;
+  }
+  in_addr_t resolved = 0;
+  const std::uint32_t bounded_ms = std::min<std::uint32_t>(timeout_ms, 5'000);
+  std::atomic<bool> done{false};
+  int native_result = -1;
+  std::thread worker([&] {
+    native_result = sceNetResolverStartNtoa(resolver, host.c_str(), &resolved,
+                                            static_cast<int>(bounded_ms * 1000), 0, 0);
+    done.store(true, std::memory_order_release);
+  });
+  const auto deadline = Clock::now() + std::chrono::milliseconds(bounded_ms);
+  while (!done.load(std::memory_order_acquire) && !cancel.load(std::memory_order_acquire) &&
+         Clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  if (!done.load(std::memory_order_acquire)) sceNetResolverAbort(resolver, 0);
+  worker.join();
+  NativeResolveError result = NativeResolveError::kFailed;
+  if (cancel.load(std::memory_order_acquire)) {
+    result = NativeResolveError::kCanceled;
+  } else if (Clock::now() >= deadline && native_result != 0) {
+    result = NativeResolveError::kTimeout;
+  } else if (native_result == 0) {
+    char numeric[INET_ADDRSTRLEN]{};
+    if (inet_ntop(AF_INET, &resolved, numeric, sizeof(numeric))) {
+      *address = numeric;
+      result = (*address == "0.0.0.0" || UnusableResolvedAddress(*address))
+                   ? NativeResolveError::kUnusableAddress
+                   : NativeResolveError::kNone;
+    }
+  }
+  sceNetResolverDestroy(resolver);
+  sceNetPoolDestroy(pool);
+  return result;
+#else
+  (void)timeout_ms;
+  *address = host;
+  return NativeResolveError::kNone;
+#endif
+}
+
 }  // namespace playden::steam::internal

@@ -54,6 +54,29 @@ int main() {
   CHECK(!(*ParseVersion("0.8.0") < *nightly) && !(*ParseVersion("0.8.0-beta.1") < *nightly));
   CHECK(*nightly < *ParseVersion("0.8.1-nightly.20200101.1"));
   CHECK(*nightly != *ParseVersion("0.8.0-nightly.20261027.3"));
+  // A trailing b is this fork's build of that upstream version. It is not SemVer, and a second
+  // build of the same upstream version is not a different version.
+  const auto upstream = ParseVersion("0.11.0");
+  const auto fork = ParseVersion("0.11.0b");
+  const auto again = ParseVersion("v0.11.0b");
+  CHECK(upstream && fork && again && *fork == *again && fork->fork_build && !upstream->fork_build);
+  CHECK(fork->ToString() == "0.11.0b" && ParseVersion(fork->ToString()) == fork);
+  CHECK(*upstream < *fork && !(*fork < *upstream));
+  const Version numeric{fork->major, fork->minor, fork->patch};
+  CHECK(numeric == *ParseVersion("00.011.000") && numeric != *fork);
+  CHECK(*fork < *ParseVersion("0.12.0"));
+  CHECK(*fork < *ParseVersion("0.12.0b"));
+  CHECK(*ParseVersion("0.12.0") < *ParseVersion("0.12.0b"));
+  CHECK(!(*fork < *again) && !(*again < *fork));
+  const auto beta_upstream = ParseVersion("0.11.0-beta.1");
+  const auto beta_fork = ParseVersion("0.11.0-beta.1b");
+  const auto beta_next = ParseVersion("0.11.0-beta.2b");
+  CHECK(beta_upstream && beta_fork && beta_next);
+  CHECK(*beta_upstream < *beta_fork && *beta_fork < *beta_next && *beta_next < *fork);
+  CHECK(ParseVersion("0.11.0-nightly.20261109.1b")->fork_build);
+  CHECK(*ParseVersion("0.11.0-nightly.20261109.1") < *ParseVersion("0.11.0-nightly.20261109.1b"));
+  for (const char* bad : {"0.11.0B", "0.11.0b2", "0.11.0bb", "0.11.0b-beta.1", "0.11.0-beta.1B"})
+    CHECK(!ParseVersion(bad));
   for (const char* bad : {"0.8.0-nightly", "0.8.0-nightly.20261027", "0.8.0-nightly.20261027.0", "0.8.0-nightly.20261027.01",
                           "0.8.0-nightly.20261027.1000", "0.8.0-nightly.2026102.1", "0.8.0-nightly.20261327.1",
                           "0.8.0-nightly.20261000.1", "0.8.0-nightly.020261027.1", "0.8.0-nightly.20261027.1.1",

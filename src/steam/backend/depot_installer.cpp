@@ -222,7 +222,8 @@ InstallError FromCm(CmError error) {
     case CmError::kNoSession: return InstallError::kNoSession;
     case CmError::kRejected: return InstallError::kRejected;
     case CmError::kNetwork:
-    case CmError::kTimeout: return InstallError::kNetwork;
+    case CmError::kTimeout:
+    case CmError::kProxy: return InstallError::kNetwork;
     case CmError::kProtocol: return InstallError::kProtocol;
   }
   return InstallError::kProtocol;

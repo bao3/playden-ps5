@@ -44,6 +44,8 @@ struct UpdateConfig {
   bool include_betas = false;
   Fetch fetch;
   std::function<std::optional<std::string>(const std::string& path)> hash_file;
+  // SHA-256 of a small body, such as playden-update.json. Unset uses SHA-256. Tests can stand in.
+  std::function<std::optional<std::string>(std::string_view bytes)> hash_bytes;
   // The verified kit's manifest SHA-256, or nullopt when the folder is not a complete kit.
   std::function<std::optional<std::string>(const std::string& kit_root)> verify_kit;
   // Runs work with root's effective user id (the title's folders under /data are root-owned).

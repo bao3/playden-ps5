@@ -10,6 +10,13 @@ if(NOT PLAYDEN_PRERELEASE STREQUAL "")
     endif()
     string(APPEND PLAYDEN_FULL_VERSION "-${PLAYDEN_PRERELEASE}")
 endif()
+# This fork's build of the upstream version. "b" is appended after any pre-release suffix
+# ("0.11.0b", "0.11.0-beta.1b"). It is not itself a SemVer pre-release. The PS5 contentVersion
+# stays the numeric PROJECT_VERSION.
+option(PLAYDEN_FORK_BUILD "Append b: this fork's build of the upstream version" ON)
+if(PLAYDEN_FORK_BUILD)
+    string(APPEND PLAYDEN_FULL_VERSION "b")
+endif()
 # The release a nightly is built on: it isn't offered that release or an older one. Other builds ignore it.
 set(PLAYDEN_NIGHTLY_BASE "" CACHE STRING "A nightly's base release: empty, X.Y.Z or X.Y.Z-beta.N")
 if(NOT PLAYDEN_NIGHTLY_BASE STREQUAL "" AND

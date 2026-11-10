@@ -28,6 +28,7 @@ enum class HttpError {
   kResponseTooLarge,
   kResponseHeadersTooLarge,
   kProtocolError,
+  kProxyFailed,  // a configured proxy could not be used; the request was not sent directly
 };
 
 const char* HttpErrorName(HttpError error);
@@ -53,6 +54,9 @@ struct HttpRequest {
   bool allow_plain_http = false;
   // A Steam depot manifest: max_response_bytes may be up to kMaxHttpManifestResponseBytes, not kMaxHttpResponseBytes.
   bool depot_manifest = false;
+  // Content downloads, the download-server speed test, and runtime kit / Playden update fetches.
+  // Other requests use the proxy only when Global proxy is on.
+  bool download_proxy = false;
 };
 
 struct HttpTiming {
@@ -81,6 +85,8 @@ struct HttpResponse {
   // The server's numeric address from the console's resolver, for logs (empty on host builds, where
   // curl resolves): a DNS server that blocks a host answers one no server listens on.
   std::string address;
+  // "http host:port" or "socks5 host:port" when a proxy failure is reported. Never a username or password.
+  std::string proxy_label;
 
   bool ok() const { return error == HttpError::kNone; }
 };

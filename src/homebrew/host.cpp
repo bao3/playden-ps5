@@ -29,7 +29,10 @@
 #include "steam/backend/entitled_library.h"
 #include "steam/backend/steam_install_runner.h"
 #include "steam/backend/steam_cloud_runner.h"
+#include "app/fork_downloads.h"
 #include "steam/backend/library_client.h"
+#include "steam/backend/network_proxy.h"
+#include "update/github_mirror.h"
 #include "steam/local_session_repository.h"
 #include "library/cache.h"
 #include "app/experimental_features.h"
@@ -594,6 +597,8 @@ int main(int argc, char** argv) {
         library_cache = std::make_unique<playden::LibraryCache>(*library_storage);
         library_service = std::make_unique<playden::LibraryService>(*library_backend,*library_sessions,library_cache.get());
         preferences=std::make_unique<playden::PreferencesStore>(*library_storage);
+        playden::MigrateForkPreferences(*library_storage);
+        playden::ApplyForkDownloads(playden::LoadForkDownloads(*library_storage));
         {
             // A download resumed at startup starts before the UI has loaded the settings: it reads the saved ones.
             const auto saved = preferences->Load().preferences;
@@ -955,6 +960,26 @@ int main(int argc, char** argv) {
         if (services) services->Tick();
         // Until the UI has the saved settings, its defaults would replace them.
         if (simulation.PreferencesLoaded()) {
+            static bool fork_loaded = false;
+            static playden::ForkDownloads applied;
+            if (!fork_loaded) {
+                applied = playden::LoadForkDownloads(*library_storage);
+                simulation.ApplyForkDownloads(applied);
+                playden::ApplyForkDownloads(applied);
+                fork_loaded = true;
+            }
+            const auto current = simulation.ExportForkDownloads();
+            const bool changed = current.proxy_mode != applied.proxy_mode || current.proxy_host != applied.proxy_host ||
+                                 current.proxy_port != applied.proxy_port || current.proxy_username != applied.proxy_username ||
+                                 current.proxy_password != applied.proxy_password || current.proxy_global != applied.proxy_global ||
+                                 current.github_mirror != applied.github_mirror ||
+                                 current.github_mirror_base != applied.github_mirror_base ||
+                                 current.github_api_base != applied.github_api_base;
+            if (changed) {
+                playden::ApplyForkDownloads(current);
+                (void)playden::SaveForkDownloads(*library_storage, current);
+                applied = current;
+            }
             download_tuning_state.downloads_slow_network.store(simulation.state().downloads_slow_network);
             {
                 std::lock_guard lock(download_tuning_state.mutex);

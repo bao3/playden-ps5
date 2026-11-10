@@ -13,7 +13,8 @@ namespace playden::update {
 std::string Version::ToString() const {
   return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch) +
          (beta ? "-beta." + std::to_string(beta) : "") +
-         (nightly() ? "-nightly." + std::to_string(nightly_date) + "." + std::to_string(nightly_build) : "");
+         (nightly() ? "-nightly." + std::to_string(nightly_date) + "." + std::to_string(nightly_build) : "") +
+         (fork_build ? "b" : "");
 }
 
 namespace {
@@ -33,6 +34,13 @@ bool ParseCount(std::string_view text, std::size_t max_digits, unsigned* value) 
 
 std::optional<Version> ParseVersion(std::string_view text) {
   if (!text.empty() && (text.front() == 'v' || text.front() == 'V')) text.remove_prefix(1);
+  // A trailing b is this fork's build of the upstream version. Only a digit may precede it, so
+  // "0.11.0b" and "0.11.0-beta.1b" are accepted and "0.11.0b2" or "0.11.0B" are not.
+  bool fork_build = false;
+  if (text.size() >= 2 && text.back() == 'b' && text[text.size() - 2] >= '0' && text[text.size() - 2] <= '9') {
+    fork_build = true;
+    text.remove_suffix(1);
+  }
   unsigned parts[3] = {};
   for (int i = 0; i < 3; ++i) {
     std::size_t digits = 0;
@@ -50,6 +58,7 @@ std::optional<Version> ParseVersion(std::string_view text) {
     }
   }
   Version version{parts[0], parts[1], parts[2]};
+  version.fork_build = fork_build;
   if (text.empty()) return version;
   if (text.substr(0, 6) == "-beta.") {
     if (!ParseCount(text.substr(6), 6, &version.beta)) return std::nullopt;

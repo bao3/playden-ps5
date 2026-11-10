@@ -75,6 +75,15 @@ def main():
         check(json.loads(out.read_text())["app"]["min_from"] == "0.7.1-beta.1", "beta minimum")
         check(json.loads(release.read_text())["prerelease"], "local beta marked prerelease")
         check(run(*common, "--tag", "v0.7.1").returncode != 0, "tag mismatch refused")
+        # A trailing b is this fork's build. contentVersion stays numeric.
+        with zipfile.ZipFile(app, "w") as archive:
+            prefix = "FAKE77031/"
+            archive.writestr(prefix + "sce_sys/param.json",
+                             json.dumps({"titleId": "FAKE77031", "contentVersion": "00.007.001"}))
+            archive.writestr(prefix + "playden-version", "0.7.1b\n")
+        result = run(*common, "--min-from", "0.7.1", "--tag", "v0.7.1b")
+        check(result.returncode == 0, result.stderr)
+        check(json.loads(out.read_text())["app"]["version"] == "0.7.1b", "fork build version")
         for bad in ("0.7.1-beta.0", "0.7.1-beta.01", "0.7.1-rc.1", "0.7.1+meta", "0.7.1\n"):
             check(run(*common, "--min-from", bad).returncode != 0, "invalid version refused: " + repr(bad))
         # The app folder is at the top (0.7.1 and older zips had it one folder down), alone of its kind, and named

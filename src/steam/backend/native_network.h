@@ -38,4 +38,9 @@ NativeResolveError AttachNativeResolution(CURL* easy, const std::string& url,
                                           const std::atomic<bool>& cancel,
                                           curl_slist** entries);
 
+// Address to put in CURLOPT_PROXY. Host builds keep a DNS name for curl. The PS5 build
+// resolves it with sceNetResolverStartNtoa and returns a dotted IPv4 address.
+NativeResolveError ResolveProxyAddress(const std::string& host, std::uint32_t timeout_ms,
+                                       const std::atomic<bool>& cancel, std::string* address);
+
 }  // namespace playden::steam::internal

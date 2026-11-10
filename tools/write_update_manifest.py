@@ -27,14 +27,24 @@ import zipfile
 
 DEV_ENDPOINTS_MARKER = "dev-endpoints-build"
 DEV_BUILD_MARKER = "dev-build"
-VERSION = re.compile(r"[vV]?([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})(?:-beta\.([1-9][0-9]{0,5}))?")
+# A trailing b is this fork's build of that upstream version. It is not a SemVer pre-release.
+VERSION = re.compile(r"[vV]?([0-9]{1,6})\.([0-9]{1,6})\.([0-9]{1,6})(?:-beta\.([1-9][0-9]{0,5}))?(b)?")
 
 
 def version(text):
     match = VERSION.fullmatch(text)
     if not match:
         raise SystemExit(f"not a version: {text!r}")
-    return ".".join(str(int(part)) for part in match.groups()[:3]) + (f"-beta.{match[4]}" if match[4] else "")
+    text = ".".join(str(int(part)) for part in match.groups()[:3]) + (f"-beta.{match[4]}" if match[4] else "")
+    return text + ("b" if match[5] else "")
+
+
+def numeric_version(text):
+    """The major.minor.patch contentVersion compares against. The fork marker is not part of it."""
+    full = version(text)
+    if full.endswith("b"):
+        full = full[:-1]
+    return full.split("-", 1)[0]
 
 
 def app_prefix(archive):
@@ -109,13 +119,13 @@ def main(argv=None):
         if prefix + DEV_BUILD_MARKER in app.namelist():
             raise SystemExit(f"{args.app_zip.name} is a dev build ({DEV_BUILD_MARKER}): every experimental feature is "
                              "on by default; build the release with PLAYDEN_DEV_BUILD=OFF")
-        numeric_version = version(param["contentVersion"])
+        content_version = version(param["contentVersion"])
         try:
             full_text = app.read(prefix + "playden-version").decode("ascii")
             app_version = version(full_text.removesuffix("\n"))
         except KeyError:
-            app_version = numeric_version  # Packages predating full version metadata.
-    if app_version.split("-", 1)[0] != numeric_version:
+            app_version = content_version  # Packages predating full version metadata.
+    if numeric_version(app_version) != content_version:
         raise SystemExit("packaged version does not match param.json contentVersion")
     if args.tag and version(args.tag) != app_version:
         raise SystemExit("release tag does not match the packaged version")

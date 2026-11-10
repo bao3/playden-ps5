@@ -10,6 +10,7 @@
 #include "library/organization.h"
 #include "library/update_check.h"
 #include "library/model.h"
+#include "app/fork_downloads.h"
 #include "runtime/game_settings.h"
 #include "steam/backend/content_language.h"
 #include "runtime/kit_version.h"
@@ -1012,6 +1013,16 @@ struct State {
     // Empty: Steam default (Steam's order); kFastestDownloadServer: Fastest (raced at each download); otherwise
     // the chosen provider's stable identifier.
     std::string download_server;
+    // Downloads proxy and the GitHub mirror. Stored in downloads.conf, not preferences.conf.
+    std::string proxy_mode = "off";
+    std::string proxy_host;
+    std::string proxy_port;
+    std::string proxy_username;
+    std::string proxy_password;
+    bool proxy_global = false;
+    bool github_mirror = false;
+    std::string github_mirror_base;
+    std::string github_api_base;
     bool hide_run_once_help = false;  // "Don't show again" on Run launcher or setup's dialog
     std::string runtime_prompt_kit;  // the kit whose runtime kit prompt was answered (its manifest SHA-256)
     bool hide_launcher_help = false;  // ...and on the one for turning on Start through a launcher
@@ -1306,6 +1317,8 @@ public:
                           const playden::PreferencesLoadResult& loaded);
     [[nodiscard]] playden::OrganizationSnapshot ExportOrganization() const;
     [[nodiscard]] playden::Preferences ExportPreferences() const;
+    void ApplyForkDownloads(const playden::ForkDownloads& downloads);
+    [[nodiscard]] playden::ForkDownloads ExportForkDownloads() const;
     [[nodiscard]] std::uint64_t OrganizationAccount() const noexcept { return organization_account_; }
     [[nodiscard]] std::uint64_t OrganizationRevision() const noexcept { return organization_revision_; }
     [[nodiscard]] std::uint64_t PreferencesRevision() const noexcept { return preferences_revision_; }

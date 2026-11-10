@@ -29,6 +29,7 @@ const char* ErrorName(AuthError error) {
     case AuthError::kRateLimited: return "rate-limited";
     case AuthError::kSignInRefused: return "sign-in-refused";
     case AuthError::kSignInTimedOut: return "sign-in-timed-out";
+    case AuthError::kProxy: return "proxy";
   }
   return "unknown";
 }

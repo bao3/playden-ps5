@@ -186,6 +186,15 @@ Settings › Updates › **Beta updates** opts into test versions before their s
 betas can have new bugs and use the same app and data. Turning it off keeps an installed beta until a newer stable
 version is available. Updates never downgrade Playden.
 
+This fork's build is the upstream version with a trailing `b` (`0.11.0` from upstream is `0.11.0b` here). That
+`b` is not a SemVer pre-release. The PS5 `contentVersion` stays the numeric upstream version. A second build of
+the same upstream version uses the same `b` and is not offered as a newer update. Settings › Downloads can use
+an HTTP or SOCKS5 proxy, off unless you turn it on. Global proxy is off unless you turn it on; loopback stays
+direct. The GitHub mirror is on only when the build was given `PLAYDEN_GITHUB_MIRROR_BASE_URL`. Release files
+use that origin plus the full original URL, and the update check uses the same origin plus the full API URL,
+only while Proxy is Off. Those choices are stored in `downloads.conf`, not in `preferences.conf`. Updates and
+the runtime kit come from this fork's releases.
+
 The previous app and kit are kept until the next update, in `/data/playden/self-update/backup/` and
 `/data/playden/kits/.previous-*`. Settings › Updates › **Go back to Playden <version>** puts them back: Playden
 closes, swaps the previous version and its kit in, and opens again. If the swap does not take and the previous
