@@ -24,7 +24,7 @@ add_library(playden_github_mirror STATIC
     "${CMAKE_SOURCE_DIR}/src/app/fork_downloads.cpp")
 target_include_directories(playden_github_mirror PUBLIC "${CMAKE_SOURCE_DIR}/src" "${PLAYDEN_GENERATED_DIR}")
 target_compile_features(playden_github_mirror PUBLIC cxx_std_17)
-target_link_libraries(playden_github_mirror PUBLIC playden_storage)
+target_link_libraries(playden_github_mirror PUBLIC playden_storage playden_steam_http)
 if(PLAYDEN_PLATFORM_PS5)
     target_compile_options(playden_github_mirror PRIVATE -fno-exceptions -fno-rtti)
 endif()

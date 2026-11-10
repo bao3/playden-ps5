@@ -19,6 +19,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Mask the injected mirror address
+        env:
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+        run: python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else ""); print("mirror-address-configured:", "yes" if v else "no")'
       - name: Install the host toolchain
         run: brew install cmake ninja pkgconf sdl2-compat
       - name: Build and run the selected tests
@@ -26,6 +30,7 @@ jobs:
           PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
         run: |
           set -euo pipefail
+          python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else "")'
           scripts/build-homebrew.sh
           cmake --build --preset homebrew-host --target \
             preferences_test network_proxy_test proxy_transport_test \
@@ -34,6 +39,7 @@ jobs:
             homebrew_library_model_test homebrew_live_model_test
           ctest --preset homebrew-host --output-on-failure \
             -R '^(preferences|network_proxy|proxy_transport|http_client|cm_client|github_mirror|fork_downloads|self_update_version|self_update_download|self_update_service|homebrew_library_model|homebrew_live_model)$'
+          python3 -c 'import os,pathlib,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); p=pathlib.Path("build/homebrew-host/github_mirror_test"); d=p.read_bytes() if p.is_file() else b""; present=bool(v) and v.encode() in d; print("injected-config-present:", "yes" if present else "no"); sys.exit(0 if (present or not v) else 1)'
 
   ps5-package:
     runs-on: ubuntu-latest
@@ -42,6 +48,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Mask the injected mirror address
+        env:
+          PLAYDEN_GITHUB_MIRROR_BASE_URL: ${{ vars.PLAYDEN_GITHUB_MIRROR_BASE_URL }}
+        run: python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else ""); print("mirror-address-configured:", "yes" if v else "no")'
       - name: Install the PS5 cross toolchain
         run: |
           sudo apt-get update
@@ -59,6 +69,7 @@ jobs:
           PLAYDEN_ACCEPT_PS5_CURL_REBUILD: "1"
         run: |
           set -euo pipefail
+          python3 -c 'import os,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); sys.stdout.write("::add-mask::%s\n"%v if v else "")'
           export PATH="$(llvm-config-18 --bindir):$PATH"
           export HOST_CXX=clang++
           scripts/fetch-deps.sh
@@ -78,3 +89,4 @@ jobs:
           if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", param["contentVersion"]):
               raise SystemExit("contentVersion must stay numeric")
           PY
+          python3 -c 'import os,pathlib,sys; v=os.environ.get("PLAYDEN_GITHUB_MIRROR_BASE_URL",""); p=pathlib.Path("build/homebrew-ps5/dist/FAKE77031/eboot.bin"); d=p.read_bytes() if p.is_file() else b""; present=bool(v) and v.encode() in d; print("injected-config-present:", "yes" if present else "no"); sys.exit(0 if (present or not v) else 1)'
