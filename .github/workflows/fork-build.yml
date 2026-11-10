@@ -125,9 +125,79 @@ jobs:
         run: |
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
-          zipfile="release/playden-ps5-${ver}.zip"
-          test -f "$zipfile"
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Playden for PS5 ${ver}" \
-            --notes "Fork build ${ver}. The version is the upstream version with a trailing b. The PS5 content version stays numeric. This is not an official upstream release, and it was not installed on a console." \
-            "$zipfile"
+          app="release/playden-ps5-${ver}.zip"
+          kit="release/playden-kit-0.21.zip"
+          test -f "$app"
+          # Copy the pinned kit onto this fork. The published manifest names the asset only.
+          curl -fsSL -o "$kit" \
+            "https://github.com/leolobato/playden-ps5/releases/download/v0.11.0-beta.2/playden-kit-0.21.zip"
+          echo "ac442f6a4359e0f6a0d7f81c31d00682930f8e683118aea44a3af83b7e45186d  $kit" | sha256sum -c -
+          python3 - "$kit" <<'PY'
+          import hashlib, sys, zipfile
+          pin = "66e5878d064645d0bda413553ee7ff9ce8f5f20b6d2807c329c58c9455c44550"
+          name = "playden-kit-0.21/playden-kit/manifest.json"
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              digest = hashlib.sha256(archive.read(name)).hexdigest()
+          if digest != pin:
+              raise SystemExit("kit manifest does not match the pin")
+          print("kit-manifest-matches-pin: yes")
+          PY
+          notes="Fork build ${ver}. This release includes the Playden app and runtime kit 0.21. The PS5 content version stays numeric."
+          python3 tools/write_update_manifest.py \
+            --app-zip "$app" \
+            --kit-zip "$kit" \
+            --kit-revision 0.21 \
+            --tag "$GITHUB_REF_NAME" \
+            --min-from 0.6.0 \
+            --notes "$notes" \
+            --out release/playden-update.json
+          python3 - <<'PY'
+          import json, pathlib
+          text = pathlib.Path("release/playden-update.json").read_text()
+          if "leolobato" in text:
+              raise SystemExit("manifest names another repository")
+          manifest = json.loads(text)
+          if manifest["kit"]["asset"] != "playden-kit-0.21.zip":
+              raise SystemExit("manifest kit asset is not the pinned kit zip")
+          print("manifest-kit-asset:", manifest["kit"]["asset"])
+          PY
+          (
+            cd release
+            sha256sum "playden-ps5-${ver}.zip" playden-kit-0.21.zip playden-update.json > SHA256SUMS
+          )
+          files=(
+            "$app"
+            "$kit"
+            release/playden-update.json
+            release/SHA256SUMS
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber "${files[@]}"
+            gh release edit "$GITHUB_REF_NAME" --title "Playden for PS5 ${ver}" --notes "$notes"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Playden for PS5 ${ver}" \
+              --notes "$notes" \
+              "${files[@]}"
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > release/published-release.json
+          gh release download "$GITHUB_REF_NAME" --pattern playden-update.json --dir release/published --clobber
+          python3 - <<'PY'
+          import json, os, pathlib
+          repo = os.environ["GITHUB_REPOSITORY"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag[1:]
+          release = json.loads(pathlib.Path("release/published-release.json").read_text())
+          prefix = f"https://github.com/{repo}/releases/download/{tag}/"
+          names = {item["name"]: item["browser_download_url"] for item in release["assets"]}
+          required = [f"playden-ps5-{version}.zip", "playden-kit-0.21.zip", "playden-update.json", "SHA256SUMS"]
+          for name in required:
+              if names.get(name) != prefix + name:
+                  raise SystemExit("a release asset is not this fork's download")
+          published = json.loads(pathlib.Path("release/published/playden-update.json").read_text())
+          if published["kit"]["asset"] != "playden-kit-0.21.zip" or "leolobato" in json.dumps(published):
+              raise SystemExit("published manifest does not name this fork's kit asset")
+          print("published-kit-asset:", published["kit"]["asset"])
+          print("published-assets-are-this-fork: yes")
+          PY
+          rm -f release/published-release.json
